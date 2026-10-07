@@ -20,10 +20,31 @@
 #include <QLocale>
 #include <QTranslator>
 
+
+#include <QDateTime>
+#include <QFile>
+#include <QTextStream>
+#include <stdio.h>
+
+// Debug output also goes to a file in the shared Berry Bridge folder (slog2
+// doesn't keep this process's lines): service_debug.log there, trimmed at 512 KB.
+static void fileMessageHandler(QtMsgType type, const char *msg)
+{
+    static const char *const kPath = "/accounts/1000/shared/misc/BerryBridge/service_debug.log";
+    QFile f(kPath);
+    if (f.size() > 512 * 1024) f.remove();
+    if (f.open(QIODevice::Append | QIODevice::Text)) {
+        const char *level = type == QtDebugMsg ? "D" : type == QtWarningMsg ? "W" : type == QtCriticalMsg ? "C" : "F";
+        QTextStream(&f) << QDateTime::currentDateTime().toString("MM-dd HH:mm:ss.zzz") << " " << level << " " << msg << "\n";
+    }
+    fprintf(stderr, "%s\n", msg);
+}
+
 using namespace bb;
 
 int main(int argc, char **argv)
 {
+    qInstallMsgHandler(fileMessageHandler);
     Application app(argc, argv);
 
     // Create the Application UI object, this is where the main.qml file

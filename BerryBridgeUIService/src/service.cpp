@@ -17,6 +17,16 @@
 #include "service.hpp"
 #include "call/callaudiotest.hpp"
 #include "call/callservice.hpp"
+#include <QDir>
+
+// Volatile state written often by BOTH processes (sync cursor, new-content
+// flags) lives in its own file, never in the main settings (server, token,
+// accounts): Qt 4's QSettings is not safe against two processes rewriting the
+// same file, and on 2026-10-07 that main file was emptied.
+static QString stateSettingsPath()
+{
+    return QDir::homePath() + "/Settings/berrybridge_state.ini";
+}
 #include <QtNetwork/QNetworkRequest>
 #include <bb/Application>
 #include <bb/platform/Notification>
@@ -208,7 +218,7 @@ void Service::startSyncLoop()
     // KALICI HAFIZADAN SON ZAMANI YÜKLE
     if (m_lastSyncTimestamp.isEmpty()) {
         m_settings.sync();
-        m_lastSyncTimestamp = m_settings.value("lastSyncTimestamp", "").toString();
+        m_lastSyncTimestamp = QSettings(stateSettingsPath(), QSettings::IniFormat).value("lastSyncTimestamp", "").toString();
     }
 
     if (m_syncTimer) {
@@ -605,8 +615,8 @@ void Service::onSyncResponseReceived()
         // SON TARİHİ CİHAZA KAYDET
         if (!maxTimestampInBatch.isEmpty() && maxTimestampInBatch > m_lastSyncTimestamp) {
             m_lastSyncTimestamp = maxTimestampInBatch;
-            QSettings settings;
-            settings.setValue("lastSyncTimestamp", m_lastSyncTimestamp);
+            QSettings state(stateSettingsPath(), QSettings::IniFormat);
+            state.setValue("lastSyncTimestamp", m_lastSyncTimestamp);
         }
 
         // FREN MEKANİZMASI
@@ -720,8 +730,8 @@ void Service::createMessageNotification(const QString& accountID, const QString&
                                       const QString& senderName, const QString& msgType, const QString& text)
 {
     // Load user preferences from QSettings
-    QSettings settings;
-    settings.setValue(QString("newContent/%1").arg(accountID), true);
+    QSettings settings; // read only here
+    QSettings(stateSettingsPath(), QSettings::IniFormat).setValue(QString("newContent/%1").arg(accountID), true);
 
     bool notificationsEnabled = settings.value("state_" + accountID, true).toBool();
     if (!notificationsEnabled) return;

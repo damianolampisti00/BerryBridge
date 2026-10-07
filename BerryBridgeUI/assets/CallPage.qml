@@ -33,20 +33,25 @@ Sheet {
                 onTriggered: callSheet.close()
             }
         }
+        // Stacked, not docked: on the Q10's 720x720 screen the buttons used to
+        // cover the timer. The caller block takes whatever space is left.
         Container {
             background: Color.create("#0B141A")
             horizontalAlignment: HorizontalAlignment.Fill
             verticalAlignment: VerticalAlignment.Fill
-            layout: DockLayout {}
+            layout: StackLayout { orientation: LayoutOrientation.TopToBottom }
 
             Container {
+                horizontalAlignment: HorizontalAlignment.Fill
+                layoutProperties: StackLayoutProperties { spaceQuota: 1 }
+                layout: DockLayout {}
+                Container {
                 horizontalAlignment: HorizontalAlignment.Center
-                verticalAlignment: VerticalAlignment.Top
-                topPadding: ui.du(8)
+                verticalAlignment: VerticalAlignment.Center
                 Container {
                     horizontalAlignment: HorizontalAlignment.Center
-                    preferredWidth: ui.du(18)
-                    preferredHeight: ui.du(18)
+                    preferredWidth: ui.du(13)
+                    preferredHeight: ui.du(13)
                     background: Color.create("#202C33")
                     layout: DockLayout {}
                     Label {
@@ -60,7 +65,7 @@ Sheet {
                 Label {
                     text: callClient.name.length > 0 ? callClient.name : callClient.phone
                     horizontalAlignment: HorizontalAlignment.Center
-                    topMargin: ui.du(3)
+                    topMargin: ui.du(2)
                     textStyle.fontSize: FontSize.XLarge
                     textStyle.color: Color.White
                 }
@@ -74,18 +79,18 @@ Sheet {
                     // Re-evaluated every second through callClient.tick (elapsed).
                     text: callClient.elapsed.length >= 0 ? callSheet.stateText() : ""
                     horizontalAlignment: HorizontalAlignment.Center
-                    topMargin: ui.du(2)
+                    topMargin: ui.du(1)
                     textStyle.fontSize: FontSize.Large
                     textStyle.color: Color.create("#8696A0")
+                }
                 }
             }
 
             Container {
                 horizontalAlignment: HorizontalAlignment.Fill
-                verticalAlignment: VerticalAlignment.Bottom
                 leftPadding: ui.du(3)
                 rightPadding: ui.du(3)
-                bottomPadding: ui.du(5)
+                bottomPadding: ui.du(3)
 
                 // Ringing: decline / answer.
                 Container {

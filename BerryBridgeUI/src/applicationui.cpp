@@ -473,14 +473,14 @@ void ApplicationUI::takePendingChat()
 
 void ApplicationUI::clearNewContent(const QString &accountId)
 {
-    QSettings settings;
-    // QSettings anahtarı: örn. "notifications/whatsapp" -> true/false
+    // Shared with the service: the volatile state file (see Service).
+    QSettings settings(QDir::homePath() + "/Settings/berrybridge_state.ini", QSettings::IniFormat);
     settings.setValue(QString("newContent/%1").arg(accountId), false);
 }
 
 bool ApplicationUI::hasNewContent(const QString &accountId) const
 {
-    QSettings settings;
+    QSettings settings(QDir::homePath() + "/Settings/berrybridge_state.ini", QSettings::IniFormat);
     return settings.value(QString("newContent/%1").arg(accountId), false).toBool();
 }
 

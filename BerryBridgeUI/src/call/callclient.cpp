@@ -26,6 +26,8 @@ CallClient::CallClient(QObject *parent) :
 {
     connect(m_socket, SIGNAL(readyRead()), this, SLOT(onReadyRead()));
     connect(m_socket, SIGNAL(disconnected()), this, SLOT(onDisconnected()));
+    connect(m_socket, SIGNAL(connected()), &m_retry, SLOT(stop()));
+    connect(m_socket, SIGNAL(error(QLocalSocket::LocalSocketError)), this, SLOT(onDisconnected()));
     m_retry.setInterval(2000);
     connect(&m_retry, SIGNAL(timeout()), this, SLOT(connectToService()));
     m_ticker.setInterval(1000);
@@ -37,18 +39,15 @@ CallClient::CallClient(QObject *parent) :
 void CallClient::connectToService()
 {
     if (m_socket->state() != QLocalSocket::UnconnectedState) return;
-    // The service's socket (CallService::socketPath): same app, same data folder.
+    // The service's socket (CallService::socketPath): same app, same data
+    // folder. Asynchronous: never blocks the UI thread (startup included).
     m_socket->connectToServer(QDir::homePath() + "/callctl.sock");
-    if (m_socket->waitForConnected(500)) {
-        m_retry.stop();
-    } else {
-        m_socket->abort();
-        if (!m_retry.isActive()) m_retry.start();
-    }
+    if (!m_retry.isActive()) m_retry.start();
 }
 
 void CallClient::onDisconnected()
 {
+    if (m_socket->state() != QLocalSocket::UnconnectedState) m_socket->abort();
     m_status.clear();
     emit changed();
     if (!m_retry.isActive()) m_retry.start();
@@ -72,11 +71,9 @@ void CallClient::onReadyRead()
 void CallClient::send(const QVariantMap &cmd)
 {
     if (m_socket->state() != QLocalSocket::ConnectedState) {
+        qWarning() << "[CALL] service not reachable";
         connectToService();
-        if (m_socket->state() != QLocalSocket::ConnectedState) {
-            qWarning() << "[CALL] service not reachable";
-            return;
-        }
+        return;
     }
     bb::data::JsonDataAccess jda;
     QByteArray out;

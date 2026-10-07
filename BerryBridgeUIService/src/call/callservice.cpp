@@ -180,6 +180,10 @@ void CallService::onGatewayText(const QByteArray &utf8)
         m_reason.clear();
         setState(Incoming);
         ring(true);
+        // Like a phone app: the call screen (Rispondi/Rifiuta) comes to the
+        // front. The system dialog from this headless process is not enough
+        // on its own (it didn't show on the Q10).
+        openUi();
     } else if (type == "call.started") {
         if (m_state == Outgoing) m_callId = id;
     } else if (type == "call.state") {

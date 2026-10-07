@@ -1,4 +1,14 @@
 #include "Database.hpp"
+#include <QDir>
+
+// Volatile state written often by BOTH processes (sync cursor, new-content
+// flags) lives in its own file, never in the main settings (server, token,
+// accounts): Qt 4's QSettings is not safe against two processes rewriting the
+// same file, and on 2026-10-07 that main file was emptied.
+static QString stateSettingsPath()
+{
+    return QDir::homePath() + "/Settings/berrybridge_state.ini";
+}
 #include <QDebug>
 #include <QtNetwork/QNetworkRequest>
 #include <QUrl>
@@ -560,7 +570,7 @@ void Database::initializeDatabaseSync() {
     QString utcTimestamp = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
 
     // 2. Settings içerisine kaydet
-    m_settings.setValue("lastSyncTimestamp", utcTimestamp);
+    QSettings(stateSettingsPath(), QSettings::IniFormat).setValue("lastSyncTimestamp", utcTimestamp);
     m_settings.sync();
 
     // 3. Doğrulamak için debug çıktısı alalım
@@ -3969,8 +3979,8 @@ void Database::onSyncResponseReceived()
         // SON TARİHİ CİHAZA KAYDET
         if (!maxTimestampInBatch.isEmpty() && maxTimestampInBatch > m_lastSyncTimestamp) {
             m_lastSyncTimestamp = maxTimestampInBatch;
-            QSettings settings;
-            settings.setValue("lastSyncTimestamp", m_lastSyncTimestamp);
+            QSettings state(stateSettingsPath(), QSettings::IniFormat);
+            state.setValue("lastSyncTimestamp", m_lastSyncTimestamp);
         }
 
         // FREN MEKANİZMASI

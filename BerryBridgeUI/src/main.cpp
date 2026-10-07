@@ -30,6 +30,26 @@
 #include <bb/cascades/pickers/FilePickerViewMode>
 #include <bb/cascades/pickers/FileType>
 
+
+#include <QDateTime>
+#include <QFile>
+#include <QTextStream>
+#include <stdio.h>
+
+// Debug output also goes to a file in the shared Berry Bridge folder (slog2
+// doesn't keep this process's lines): ui_debug.log there, trimmed at 512 KB.
+static void fileMessageHandler(QtMsgType type, const char *msg)
+{
+    static const char *const kPath = "/accounts/1000/shared/misc/BerryBridge/ui_debug.log";
+    QFile f(kPath);
+    if (f.size() > 512 * 1024) f.remove();
+    if (f.open(QIODevice::Append | QIODevice::Text)) {
+        const char *level = type == QtDebugMsg ? "D" : type == QtWarningMsg ? "W" : type == QtCriticalMsg ? "C" : "F";
+        QTextStream(&f) << QDateTime::currentDateTime().toString("MM-dd HH:mm:ss.zzz") << " " << level << " " << msg << "\n";
+    }
+    fprintf(stderr, "%s\n", msg);
+}
+
 using namespace bb::cascades;
 
 Q_DECL_EXPORT int main(int argc, char **argv)
@@ -41,6 +61,7 @@ Q_DECL_EXPORT int main(int argc, char **argv)
     qmlRegisterUncreatableType<pickers::FileType>("bb.cascades.pickers", 1, 0, "FileType", "");
     qmlRegisterUncreatableType<pickers::FilePickerViewMode>("bb.cascades.pickers", 1, 0, "FilePickerViewMode", "");
 
+    qInstallMsgHandler(fileMessageHandler);
     Application app(argc, argv);
 
     // is loaded and the application scene is set.
