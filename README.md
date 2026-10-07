@@ -18,7 +18,7 @@ What it adds:
 
 ## 📞 WhatsApp calls (experimental)
 
-Berry Bridge can make and receive **WhatsApp voice calls** on the BlackBerry. Beeper doesn't carry calls, so they go through [WaCalls](https://github.com/JotaDev66/WaCalls), a server that implements WhatsApp's VoIP stack (signaling, MLow codec, SRTP relays) on top of whatsmeow, plus a small **Berry Bridge gateway** added to it (`cmd/server/bbgateway.go`). The phone stays a plain audio terminal: it only moves 16 kHz PCM and simple JSON commands over one TLS WebSocket.
+Berry Bridge can make and receive **WhatsApp voice calls** on the BlackBerry. Beeper doesn't carry calls, so they go through [WaCalls](https://github.com/JotaDev66/WaCalls), a server that implements WhatsApp's VoIP stack (signaling, MLow codec, SRTP relays) on top of whatsmeow, plus a small **Berry Bridge gateway** added to it in [damianolampisti00/WaCalls](https://github.com/damianolampisti00/WaCalls#berry-bridge-gateway-blackberry-10) (`cmd/server/bbgateway.go`). The phone stays a plain audio terminal: it only moves 16 kHz PCM and simple JSON commands over one TLS WebSocket.
 
 ```
 WhatsApp <-> WaCalls (linked device of your account) <-> gateway (wss, token) <-> Berry Bridge service <-> mic / earpiece / speaker
@@ -31,7 +31,7 @@ WhatsApp <-> WaCalls (linked device of your account) <-> gateway (wss, token) <-
 
 Setup:
 
-1. Run WaCalls with the gateway on its own listener and a random token (16+ characters) in a file, e.g. `wacalls -addr 127.0.0.1:8097 -bb-addr 127.0.0.1:8098 -bb-token-file bb_token`, and pair it with your WhatsApp (QR, *Linked devices*). Keep the WaCalls API itself on localhost: it has no authentication.
+1. Run [the WaCalls fork](https://github.com/damianolampisti00/WaCalls) with the gateway on its own listener and a random token (16+ characters) in a file, e.g. `wacalls -addr 127.0.0.1:8097 -bb-addr 127.0.0.1:8098 -bb-token-file bb_token`, and pair it with your WhatsApp (QR, *Linked devices*). Keep the WaCalls API itself on localhost: it has no authentication.
 2. Expose only the gateway, over HTTPS (for example a Cloudflare tunnel to `localhost:8098`; HTTP/2 transport is the safer choice for a long-lived audio stream).
 3. In Berry Bridge **Settings**: *Calls server* `wss://your-host/ws` and *Calls token*. The status line below them shows the link state.
 
