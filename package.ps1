@@ -18,16 +18,20 @@
 param(
     [switch]$Install,
     [string]$PhoneIp,
-    [string]$RootKey
+    [string]$RootKey,
+    # Developer builds: the call-audio test harness (calltest.json) and debug
+    # logs in the shared folder. Never for builds you give to others.
+    [switch]$DevTools
 )
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 $config = Join-Path $root 'package.config.ps1'
 if (Test-Path $config) {
-    $cliPhoneIp = $PhoneIp; $cliRootKey = $RootKey
+    $cliPhoneIp = $PhoneIp; $cliRootKey = $RootKey; $cliDevTools = $DevTools.IsPresent
     . $config
     if ($cliPhoneIp) { $PhoneIp = $cliPhoneIp }
     if ($cliRootKey) { $RootKey = $cliRootKey }
+    if ($cliDevTools) { $DevTools = $true }
 }
 $ui = "$root\BerryBridgeUI"
 $svc = "$root\BerryBridgeUIService"
@@ -48,12 +52,18 @@ Set-Content $descPath $desc -Encoding UTF8 -NoNewline
 $full = "$ver.$build"
 
 # --- build both binaries (out of tree; delete build\<x>\Makefile after a .pro change) ---
+$extraConfig = @()
+if ($DevTools) { $extraConfig += 'CONFIG+=calltest' }
 function Build-Project([string]$pro, [string]$dir) {
     New-Item -ItemType Directory -Force $dir | Out-Null
     Push-Location $dir
     try {
+        # Switching -DevTools on/off needs a fresh qmake run.
+        $flag = "devtools=$([bool]$DevTools)"
+        if ((Test-Path Makefile) -and ((Get-Content .buildflags -ErrorAction SilentlyContinue) -ne $flag)) { Remove-Item Makefile }
+        Set-Content .buildflags $flag
         if (-not (Test-Path Makefile)) {
-            qmake $pro -spec blackberry-armv7le-qcc CONFIG+=device CONFIG+=release
+            qmake $pro -spec blackberry-armv7le-qcc CONFIG+=device CONFIG+=release @extraConfig
             if ($LASTEXITCODE -ne 0) { throw "qmake failed for $pro" }
         }
         make -j4

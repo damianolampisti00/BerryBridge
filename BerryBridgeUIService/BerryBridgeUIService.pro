@@ -14,3 +14,5 @@ LIBS += -lbbdata
 SOURCES += src/call/callaudio.cpp src/call/callaudiotest.cpp src/call/websocketclient.cpp src/call/calllink.cpp src/call/callservice.cpp
 HEADERS += src/call/audioring.hpp src/call/callaudio.hpp src/call/callaudiotest.hpp src/call/websocketclient.hpp src/call/calllink.hpp src/call/callservice.hpp
 LIBS += -lasound -laudio_manager
+# package.ps1 -DevTools: call test harness + file logs (never in public builds).
+calltest: DEFINES += BB_CALL_TEST BB_FILE_LOG

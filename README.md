@@ -12,9 +12,34 @@ What it adds:
 - **Profile pictures** for direct and group chats, fetched through Beeper Desktop's `/v1/assets/serve` and cached as small thumbnails. This also fixes the stored participant list of direct chats, which was unreadable (`JsonDataAccess::saveToBuffer` appends to the string it is given).
 - **Dark theme** (WhatsApp-like palette), selectable in **Settings > Dark theme** and applied right away; the light theme keeps the original colors.
 - **Voice messages without BerryCore**: received voice notes play inside the chat (Ogg/Opus decoded on the phone), and you can record and send your own (with an empty text field the send button becomes a microphone). Recording uses the phone's voice-recording audio path with the driver's mmap mode off, which removes the crackling it otherwise produces.
+- **WhatsApp voice calls** (experimental, see [below](#-whatsapp-calls-experimental)): incoming and outgoing 1:1 calls with a call screen, through a WaCalls server.
+- **Safer settings**: the sync cursor and the new-message flags, which the app and its service both rewrite all the time, moved out of the main settings file; sharing it could empty it (server, token and accounts lost).
 - **`package.ps1`**: builds the app and its service from the command line into one `.bar`, and can install it on a rooted phone over SSH (`-Install`; set `$PhoneIp`/`$RootKey` in `package.config.ps1`, see `package.config.example.ps1`). It needs the BlackBerry 10 Native SDK 10.3 in `C:bndk` and Git for Windows.
 
-Credits: Berry Bridge by Adem Zengin (MIT, see `LICENSE`); the Ogg/Opus encoder and decoder come from BBport; libopus is BSD-licensed (`third_party/opus/COPYING`).
+## 📞 WhatsApp calls (experimental)
+
+Berry Bridge can make and receive **WhatsApp voice calls** on the BlackBerry. Beeper doesn't carry calls, so they go through [WaCalls](https://github.com/JotaDev66/WaCalls), a server that implements WhatsApp's VoIP stack (signaling, MLow codec, SRTP relays) on top of whatsmeow, plus a small **Berry Bridge gateway** added to it (`cmd/server/bbgateway.go`). The phone stays a plain audio terminal: it only moves 16 kHz PCM and simple JSON commands over one TLS WebSocket.
+
+```
+WhatsApp <-> WaCalls (linked device of your account) <-> gateway (wss, token) <-> Berry Bridge service <-> mic / earpiece / speaker
+```
+
+- **Incoming calls**: the call screen comes up with *Rispondi* / *Rifiuta*, plus a Hub notification (and a missed-call one if you don't answer). The call also rings on your main phone, as on any linked device.
+- **Outgoing calls**: *Chiama* in the title bar of WhatsApp one-to-one chats (the number comes from Beeper's participant list).
+- **In a call**: timer, mute, speaker/earpiece, hang up. The call lives in the headless service, so hiding the screen or closing the app doesn't end it.
+- **Audio**: 16 kHz mono PCM both ways, 20 ms blocks up, a jitter buffer down, the system's voice audio path; the gateway levels the peer's voice. About 10% CPU on a Q10. The certificate of the gateway is verified.
+
+Setup:
+
+1. Run WaCalls with the gateway on its own listener and a random token (16+ characters) in a file, e.g. `wacalls -addr 127.0.0.1:8097 -bb-addr 127.0.0.1:8098 -bb-token-file bb_token`, and pair it with your WhatsApp (QR, *Linked devices*). Keep the WaCalls API itself on localhost: it has no authentication.
+2. Expose only the gateway, over HTTPS (for example a Cloudflare tunnel to `localhost:8098`; HTTP/2 transport is the safer choice for a long-lived audio stream).
+3. In Berry Bridge **Settings**: *Calls server* `wss://your-host/ws` and *Calls token*. The status line below them shows the link state.
+
+Not done yet: echo cancellation on the speakerphone (use the earpiece, or a headset), video calls, group calls.
+
+For development, `package.ps1 -DevTools` adds a call-audio test harness and debug logs in the shared folder. Never use it for builds you give to others: those files are reachable by other apps.
+
+Credits: Berry Bridge by Adem Zengin (MIT, see `LICENSE`); the Ogg/Opus encoder and decoder come from BBport; libopus is BSD-licensed (`third_party/opus/COPYING`); calls rely on WaCalls by JotaDev66 (MIT) and whatsmeow.
 
 ## 📱 Screenshots
 

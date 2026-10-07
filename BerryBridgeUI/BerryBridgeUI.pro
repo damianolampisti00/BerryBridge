@@ -29,3 +29,5 @@ LIBS += -lasound -laudio_manager -lbbmultimedia
 # --- WhatsApp calls: UI client of the service's CallService (src/call).
 SOURCES += src/call/callclient.cpp
 HEADERS += src/call/callclient.hpp
+# package.ps1 -DevTools: file logs (never in public builds).
+calltest: DEFINES += BB_FILE_LOG

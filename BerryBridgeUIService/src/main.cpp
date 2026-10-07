@@ -21,12 +21,13 @@
 #include <QTranslator>
 
 
+#ifdef BB_FILE_LOG
 #include <QDateTime>
 #include <QFile>
 #include <QTextStream>
 #include <stdio.h>
 
-// Debug output also goes to a file in the shared Berry Bridge folder (slog2
+// Developer builds only (package.ps1 -DevTools): debug output also goes to a file in the shared Berry Bridge folder (slog2
 // doesn't keep this process's lines): service_debug.log there, trimmed at 512 KB.
 static void fileMessageHandler(QtMsgType type, const char *msg)
 {
@@ -39,12 +40,15 @@ static void fileMessageHandler(QtMsgType type, const char *msg)
     }
     fprintf(stderr, "%s\n", msg);
 }
+#endif
 
 using namespace bb;
 
 int main(int argc, char **argv)
 {
+#ifdef BB_FILE_LOG
     qInstallMsgHandler(fileMessageHandler);
+#endif
     Application app(argc, argv);
 
     // Create the Application UI object, this is where the main.qml file

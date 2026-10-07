@@ -101,11 +101,17 @@ Service::Service() :
 
     QTimer::singleShot(2000, this, SLOT(startSyncLoop()));
 
-    // WhatsApp calls: the call service (gateway link, ringing, audio, UI
-    // socket) and the call-audio test driven by calltest.json.
+    // WhatsApp calls: the call service (gateway link, ringing, audio, UI socket).
     CallService *calls = new CallService(this);
+#ifdef BB_CALL_TEST
+    // Developer builds only (package.ps1 -DevTools): the call-audio test
+    // driven by calltest.json in the SHARED folder -- any app able to write
+    // there could otherwise reconfigure the call gateway or stream the mic.
     CallAudioTest *callTest = new CallAudioTest(this);
     connect(callTest, SIGNAL(configChanged()), calls, SLOT(reloadConfig()));
+#else
+    Q_UNUSED(calls);
+#endif
 
     if (m_netConfManager->isOnline()) {
         qDebug() << "[service.cpp] [NETWORK] Device is ONLINE at startup.";
