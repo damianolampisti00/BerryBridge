@@ -24,6 +24,8 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QtGui/QImageReader>
+#include <QtGui/QImage>
+#include <QCryptographicHash>
 
 using namespace bb::data;
 using namespace bb::system;
@@ -40,6 +42,12 @@ Database::Database(QObject *parent) : QObject(parent)
     m_initRun = m_settings.value("initRun", false).toBool();
     m_netManager = new QNetworkAccessManager(this);
 
+    m_avatarActive = 0;
+    m_avatarRefresh = new QTimer(this);
+    m_avatarRefresh->setSingleShot(true);
+    m_avatarRefresh->setInterval(700);
+    connect(m_avatarRefresh, SIGNAL(timeout()), this, SIGNAL(dataRefreshRequested()));
+
     // Periodic Sync
     m_syncTimer = 0;
     m_syncReply = 0;
@@ -48,9 +56,8 @@ Database::Database(QObject *parent) : QObject(parent)
     m_lastSyncTimestamp = "1970-01-01T00:00:00Z";
     m_nextCursor = "";
 
-    if (!m_invokeManager) {
-        m_invokeManager = new bb::system::InvokeManager(this);
-    }
+    // (Was `if (!m_invokeManager)` on a member nothing had initialized yet.)
+    m_invokeManager = new bb::system::InvokeManager(this);
 
     //QTimer::singleShot(2000, this, SLOT(startSyncLoop()));
 
@@ -324,7 +331,8 @@ QVariantList Database::getChatListForAccount(const QString &accountID, int limit
     QSqlQuery query(db);
     // LIMIT ve OFFSET eklendi
     query.prepare("SELECT id, title, type, unreadCount, lastActivity, "
-                  "isPinned, isArchived, isMuted, preview_json, isReadOnly "
+                  "isPinned, isArchived, isMuted, preview_json, isReadOnly, "
+                  "imgURL, participants_json "
                   "FROM chats "
                   "WHERE accountID = ? "
                   "ORDER BY isPinned DESC, lastActivity DESC "
@@ -350,6 +358,8 @@ QVariantList Database::getChatListForAccount(const QString &accountID, int limit
     const int archivedIdx = rec.indexOf("isArchived");
     const int mutedIdx = rec.indexOf("isMuted");
     const int readOnlyIdx = rec.indexOf("isReadOnly");
+    const int imgIdx = rec.indexOf("imgURL");
+    const int participantsIdx = rec.indexOf("participants_json");
 
     // İPTAL EDİLEN: const int previewIdx = rec.indexOf("preview");
     // EKLENEN: Sütun adını preview_json olarak güncelledik
@@ -375,6 +385,11 @@ QVariantList Database::getChatListForAccount(const QString &accountID, int limit
 
         chat["lastMessageTime"] = formatTimeForDisplay(timestamp);
         chat["timestamp"] = timestamp;
+
+        // "" until the thumbnail is cached (avatarFor starts the download;
+        // the list reloads by itself once it has arrived).
+        chat["avatarPath"] = avatarFor(avatarSourceFor(chatType, query.value(imgIdx).toString(),
+                                                       query.value(participantsIdx).toString()));
 
 
         // --- YENİ PREVIEW JSON İŞLEME MANTIĞI ---
@@ -569,7 +584,7 @@ void Database::initializeDatabaseSync() {
     QSqlDatabase::removeDatabase("messages_db_conn");
     QSqlDatabase::removeDatabase("chats_db_conn");
 
-    QDir sharedDir("/accounts/1000/shared/misc/Beeper");
+    QDir sharedDir("/accounts/1000/shared/misc/BerryBridge");
     if (sharedDir.exists()) {
         QStringList filters;
         filters << "*.db" << "*.db-shm" << "*.db-wal";
@@ -845,17 +860,19 @@ void Database::onChatsDetailsFetched() {
     chat["messageExpirySeconds"] = rawChat.value("messageExpirySeconds").isNull() ? 0 : rawChat.value("messageExpirySeconds").toInt();
 
     // Participants objesini JSON string'e çevir
-    QString participantsJsonStr = "[]";
+    QString participantsJsonStr; // saveToBuffer APPENDS: must start empty
     if (!rawChat.value("participants").isNull()) {
         jda.saveToBuffer(rawChat.value("participants"), &participantsJsonStr);
     }
+    if (participantsJsonStr.isEmpty()) participantsJsonStr = "[]";
     chat["participants_json"] = participantsJsonStr;
 
     // Capabilities objesini JSON string'e çevir
-    QString capabilitiesJsonStr = "{}";
+    QString capabilitiesJsonStr; // saveToBuffer APPENDS: must start empty
     if (!rawChat.value("capabilities").isNull()) {
         jda.saveToBuffer(rawChat.value("capabilities"), &capabilitiesJsonStr);
     }
+    if (capabilitiesJsonStr.isEmpty()) capabilitiesJsonStr = "{}";
     chat["capabilities_json"] = capabilitiesJsonStr;
 
     // --- UPSERT BIND İŞLEMLERİ ---
@@ -903,8 +920,8 @@ void Database::finishDatabaseSync() {
     m_initRun = true;
 
     bb::system::InvokeRequest request;
-    request.setTarget("com.example.BerryBridgeUIService");
-    request.setAction("com.example.BerryBridgeUIService.INIT_UPDATE");
+    request.setTarget("it.berrybridge.service");
+    request.setAction("it.berrybridge.service.INIT_UPDATE");
     m_invokeManager->invoke(request);
 
     // 3. UI tarafına her şeyin hazır olduğunu bildir
@@ -1082,7 +1099,7 @@ void Database::markChatAsRead(const QString &accountID, const QString &chatID) {
     if (changed) {
         emit dataRefreshRequested();
 
-        QFile refreshFile("/accounts/1000/shared/misc/Beeper/ui_refresh_trigger.txt");
+        QFile refreshFile("/accounts/1000/shared/misc/BerryBridge/ui_refresh_trigger.txt");
         if (refreshFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
             refreshFile.write(QByteArray::number(QDateTime::currentMSecsSinceEpoch()));
             refreshFile.close();
@@ -1137,7 +1154,7 @@ void Database::markChatAsUnread(const QString &accountID, const QString &chatID)
     if (changed) {
         emit dataRefreshRequested();
 
-        QFile refreshFile("/accounts/1000/shared/misc/Beeper/ui_refresh_trigger.txt");
+        QFile refreshFile("/accounts/1000/shared/misc/BerryBridge/ui_refresh_trigger.txt");
         if (refreshFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
             refreshFile.write(QByteArray::number(QDateTime::currentMSecsSinceEpoch()));
             refreshFile.close();
@@ -1491,7 +1508,7 @@ QVariantList Database::getMessagesForChat(const QString &accountID, const QStrin
                     message["fileSizeStr"] = fileSizeStr;
 
                     // Dosya yolunu yeni mantığa göre birleştir ve kontrol et
-                    QString localPath = "/accounts/1000/shared/misc/Beeper/" + subDir + "/" + finalFileName;
+                    QString localPath = "/accounts/1000/shared/misc/BerryBridge/" + subDir + "/" + finalFileName;
 
                     if (QFile::exists(localPath)) {
                         message["localImagePath"] = "file://" + localPath;
@@ -1555,9 +1572,9 @@ QVariantList Database::getMessagesForChat(const QString &accountID, const QStrin
                         //mentionPreview = QString::fromUtf8("📷 Photo");
                         isMentionImg = true;
                         if(isSender){
-                            mentionImgLocalUrl = "/accounts/1000/shared/misc/Beeper/images/" + menFileName;
+                            mentionImgLocalUrl = "/accounts/1000/shared/misc/BerryBridge/images/" + menFileName;
                         }else{
-                            mentionImgLocalUrl = "/accounts/1000/shared/misc/Beeper/images/" + linkedType + localDtMen.toString("_yyMMdd_") + linkedMessageID +"." +(menMimeType.contains("png") ? "png" : "jpg");
+                            mentionImgLocalUrl = "/accounts/1000/shared/misc/BerryBridge/images/" + linkedType + localDtMen.toString("_yyMMdd_") + linkedMessageID +"." +(menMimeType.contains("png") ? "png" : "jpg");
                         }
                         if (QFile::exists(mentionImgLocalUrl)) {
                             mentionImgLocalUrl = "file://" + mentionImgLocalUrl;
@@ -1623,7 +1640,7 @@ void Database::downloadAttachment(const QString &mxcUrl, const QString &messageI
     }
 
     // Dosya yolunu messageId yerine fileName ile oluşturuyoruz
-    QString dirPath = "/accounts/1000/shared/misc/Beeper/" + subDir;
+    QString dirPath = "/accounts/1000/shared/misc/BerryBridge/" + subDir;
     QString localPath = dirPath + "/" + fileName;
 
     qDebug() << "[DATABASE] Requesting download for type:" << typeUpper << " Path:" << localPath;
@@ -1656,6 +1673,127 @@ void Database::downloadAttachment(const QString &mxcUrl, const QString &messageI
 
     connect(reply, SIGNAL(downloadProgress(qint64, qint64)), this, SLOT(onDownloadProgress(qint64)));
     connect(reply, SIGNAL(finished()), this, SLOT(onAttachmentDownloaded()));
+}
+
+// ---- Profile pictures -------------------------------------------------
+// The upstream app only ever drew the name's initial. Beeper Desktop's avatar
+// URLs point into ITS machine: a direct chat's picture is the other
+// participant's imgURL (file:// or mxc://), a group's is the chat's own
+// imgURL -- a BARE /home/... path, which /v1/assets/serve rejects (HTTP 400)
+// until it gets a file:// prefix (both checked 2026-10-05). So everything goes
+// through /v1/assets/serve (or straight to http(s)/data: URLs), shrunk to a
+// small square thumbnail and cached on the phone, one file per source URL.
+
+static const char *const kAvatarDir = "/accounts/1000/shared/misc/BerryBridge/avatars";
+static const int kAvatarParallel = 3;
+static const int kAvatarSide = 160; // px: the list shows ~12du, ~120px on a Q10
+
+QString Database::avatarSourceFor(const QString &chatType, const QString &imgURL, const QString &participantsJson)
+{
+    QString src = imgURL.trimmed();
+    if (src.isEmpty() && chatType == "single" && !participantsJson.isEmpty()) {
+        // Rows stored before the saveToBuffer fix (see the participants_json
+        // upserts) read "[]{...}": skip that stray prefix.
+        QString json = participantsJson.trimmed();
+        if ((json.startsWith("[]") || json.startsWith("{}")) && json.length() > 2) json = json.mid(2);
+        bb::data::JsonDataAccess jda;
+        const QVariant parsed = jda.loadFromBuffer(json);
+        QVariantList items = parsed.toMap().value("items").toList(); // {items, hasMore, total}
+        if (items.isEmpty()) items = parsed.toList();
+        for (int i = 0; i < items.size(); ++i) {
+            const QVariantMap p = items.at(i).toMap();
+            const QString img = p.value("imgURL").toString();
+            if (!p.value("isSelf").toBool() && !img.isEmpty()) {
+                src = img;
+                break;
+            }
+        }
+    }
+    if (src.startsWith("/")) src = "file://" + src;
+    return src;
+}
+
+QString Database::avatarCachePath(const QString &src)
+{
+    return QString(kAvatarDir) + "/"
+            + QString::fromLatin1(QCryptographicHash::hash(src.toUtf8(), QCryptographicHash::Md5).toHex())
+            + ".png";
+}
+
+// The cached thumbnail's file:// URL, or "" after queueing its download.
+QString Database::avatarFor(const QString &src)
+{
+    if (src.isEmpty()) return QString();
+    const QString path = avatarCachePath(src);
+    if (QFile::exists(path)) return "file://" + path;
+    if (!m_avatarFailed.contains(src) && !m_avatarPending.contains(src)) {
+        m_avatarPending.insert(src);
+        m_avatarQueue.append(src);
+        pumpAvatarQueue();
+    }
+    return QString();
+}
+
+void Database::pumpAvatarQueue()
+{
+    while (m_avatarActive < kAvatarParallel && !m_avatarQueue.isEmpty()) {
+        const QString src = m_avatarQueue.takeFirst();
+        if (src.startsWith("data:")) { // inline: data:image/jpeg;base64,....
+            saveAvatar(src, QByteArray::fromBase64(src.section(',', 1).toLatin1()));
+            continue;
+        }
+        QNetworkRequest request;
+        if (src.startsWith("http://") || src.startsWith("https://")) {
+            request.setUrl(QUrl(src));
+        } else {
+            QUrl url(m_url + "/v1/assets/serve");
+            url.addQueryItem("url", src);
+            request.setUrl(url);
+            request.setRawHeader("Authorization", ("Bearer " + m_accessToken).toLatin1());
+        }
+        QNetworkReply *reply = m_netManager->get(request);
+        reply->setProperty("avatarSrc", src);
+        connect(reply, SIGNAL(finished()), this, SLOT(onAvatarFetched()));
+        ++m_avatarActive;
+    }
+}
+
+void Database::onAvatarFetched()
+{
+    QNetworkReply *reply = qobject_cast<QNetworkReply *>(sender());
+    if (!reply) return;
+    reply->deleteLater();
+    --m_avatarActive;
+    const QString src = reply->property("avatarSrc").toString();
+    const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    if (reply->error() == QNetworkReply::NoError && status == 200) {
+        saveAvatar(src, reply->readAll());
+    } else {
+        qWarning() << "[AVATAR] fetch failed, HTTP" << status << reply->errorString();
+        m_avatarPending.remove(src);
+        m_avatarFailed.insert(src);
+    }
+    pumpAvatarQueue();
+}
+
+void Database::saveAvatar(const QString &src, const QByteArray &data)
+{
+    m_avatarPending.remove(src);
+    QImage image;
+    if (!image.loadFromData(data)) {
+        m_avatarFailed.insert(src);
+        return;
+    }
+    // A small centred square: a full-size photo per row would cost a lot of
+    // memory in a long list, and the row only shows a circle of ~12du anyway.
+    QImage thumb = image.scaled(kAvatarSide, kAvatarSide, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+    thumb = thumb.copy((thumb.width() - kAvatarSide) / 2, (thumb.height() - kAvatarSide) / 2, kAvatarSide, kAvatarSide);
+    QDir().mkpath(kAvatarDir);
+    if (!thumb.save(avatarCachePath(src), "PNG")) {
+        m_avatarFailed.insert(src);
+        return;
+    }
+    m_avatarRefresh->start(); // one list reload per burst of arrivals
 }
 
 void Database::onAttachmentDownloaded() {
@@ -1881,7 +2019,7 @@ void Database::markAllChatsAsRead(const QString &accountID) {
         emit dataRefreshRequested();
 
         // UI tetikleyici dosya yazımı
-        QFile refreshFile("/accounts/1000/shared/misc/Beeper/ui_refresh_trigger.txt");
+        QFile refreshFile("/accounts/1000/shared/misc/BerryBridge/ui_refresh_trigger.txt");
         if (refreshFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
             refreshFile.write(QByteArray::number(QDateTime::currentMSecsSinceEpoch()));
             refreshFile.close();
@@ -2130,7 +2268,7 @@ bool Database::initContext() {
 
     {
         QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "messages_db_conn");
-        db.setDatabaseName("/accounts/1000/shared/misc/Beeper/messages.db");
+        db.setDatabaseName("/accounts/1000/shared/misc/BerryBridge/messages.db");
         if (!db.open()) {
             qCritical() << "[CRITICAL] Messages dosyası acilamadi:" << db.lastError().text();
             return false;
@@ -2182,7 +2320,7 @@ bool Database::initContext() {
 
     {
         QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "chats_db_conn");
-        db.setDatabaseName("/accounts/1000/shared/misc/Beeper/chats.db");
+        db.setDatabaseName("/accounts/1000/shared/misc/BerryBridge/chats.db");
         if (!db.open()) {
             qCritical() << "[CRITICAL] Chats dosyası acilamadi:" << db.lastError().text();
             return false;
@@ -2262,7 +2400,7 @@ Q_INVOKABLE void Database::setMute(const QString &chatID, bool value) {
 
             // 3. ADIM: Cross-process tetikleyici (Servis tarafı için)
             // Servis'in bu değişikliği algılayıp gerekirse bildirimleri susturması sağlanır.
-            QFile refreshFile("/accounts/1000/shared/misc/Beeper/ui_refresh_trigger.txt");
+            QFile refreshFile("/accounts/1000/shared/misc/BerryBridge/ui_refresh_trigger.txt");
             if (refreshFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
                 refreshFile.write(QByteArray::number(QDateTime::currentMSecsSinceEpoch()));
                 refreshFile.close();
@@ -2492,8 +2630,8 @@ void Database::saveCredentials(const QString &key, const QString &value) {
     settings.sync();
 
     bb::system::InvokeRequest request;
-    request.setTarget("com.example.BerryBridgeUIService");
-    request.setAction("com.example.BerryBridgeUIService.CRED_UPDATE");
+    request.setTarget("it.berrybridge.service");
+    request.setAction("it.berrybridge.service.CRED_UPDATE");
     m_invokeManager->invoke(request);
 }
 
@@ -2566,7 +2704,7 @@ void Database::onCreateChatFinished()
     emit chatCreatedError(statusCode, QString::fromUtf8(responseData));
 }
 
-void Database::uploadAssetAndSend(const QString &filePath, const QString &accountID, const QString &chatID, const QString &text, const QString &pendingMsgID, const QString &replyToMessageID) {
+void Database::uploadAssetAndSend(const QString &filePath, const QString &accountID, const QString &chatID, const QString &text, const QString &pendingMsgID, const QString &replyToMessageID, double voiceDuration) {
 
     QString cleanFilePath = filePath;
     if (cleanFilePath.startsWith("file://")) {
@@ -2682,6 +2820,7 @@ void Database::uploadAssetAndSend(const QString &filePath, const QString &accoun
     reply->setProperty("fileName", originalFileName);
 
     reply->setProperty("originalFilePath", cleanFilePath);
+    reply->setProperty("voiceDuration", voiceDuration);
 
     connect(reply, SIGNAL(uploadProgress(qint64, qint64)), this, SLOT(onUploadProgress(qint64, qint64)));
     connect(reply, SIGNAL(finished()), this, SLOT(onAssetUploadFinished()));
@@ -2753,7 +2892,7 @@ void Database::onAssetUploadFinished() {
             subDir = "images";
         }
 
-        QString dirPath = "/accounts/1000/shared/misc/Beeper/" + subDir;
+        QString dirPath = "/accounts/1000/shared/misc/BerryBridge/" + subDir;
         QString localPath = dirPath + "/" + fileName;
 
         QDir dir;
@@ -2786,6 +2925,15 @@ void Database::onAssetUploadFinished() {
     attachment["uploadID"]    = uploadID;
     attachment["contentType"] = mimeType;
     attachment["name"]        = fileName;
+    // A recorded voice message (VoiceRecorder): Ogg/Opus, sent as a real
+    // voice note (the API's MessageAttachmentInput type "voice-note"), so
+    // the networks render a voice bubble rather than an audio file.
+    const double voiceDuration = reply->property("voiceDuration").toDouble();
+    if (voiceDuration > 0) {
+        attachment["type"]     = "voice-note";
+        attachment["mimeType"] = "audio/ogg";
+        attachment["duration"] = voiceDuration;
+    }
 
     // Mesajı Beeper/Matrix'e bildir
     sendMessage(accountID, chatID, pendingMsgID, text, attachment,rMsgId);
@@ -3068,7 +3216,7 @@ void Database::onRemoveReactionFinished() {
         }
 
         // UI Arayüzünü Tetikle
-        QFile refreshFile("/accounts/1000/shared/misc/Beeper/ui_refresh_trigger.txt");
+        QFile refreshFile("/accounts/1000/shared/misc/BerryBridge/ui_refresh_trigger.txt");
         if (refreshFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
             refreshFile.write(QByteArray::number(QDateTime::currentMSecsSinceEpoch()));
             refreshFile.close();
@@ -3117,7 +3265,7 @@ void Database::deleteMessage(const QString &chatID, const QString &msgID, bool f
         }
 
         // UI Arayüzünü Tetikle
-        QFile refreshFile("/accounts/1000/shared/misc/Beeper/ui_refresh_trigger.txt");
+        QFile refreshFile("/accounts/1000/shared/misc/BerryBridge/ui_refresh_trigger.txt");
         if (refreshFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
             refreshFile.write(QByteArray::number(QDateTime::currentMSecsSinceEpoch()));
             refreshFile.close();
@@ -3266,7 +3414,7 @@ void Database::deleteChat(const QString &chatID) {
     }
 
     // UI Arayüzünü Tetikle
-    QFile refreshFile("/accounts/1000/shared/misc/Beeper/ui_refresh_trigger.txt");
+    QFile refreshFile("/accounts/1000/shared/misc/BerryBridge/ui_refresh_trigger.txt");
     if (refreshFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         refreshFile.write(QByteArray::number(QDateTime::currentMSecsSinceEpoch()));
         refreshFile.close();
@@ -3305,7 +3453,7 @@ Q_INVOKABLE void Database::setPin(const QString &chatID, bool value) {
 
             // 3. ADIM: Cross-process tetikleyici (Servis tarafı için)
             // Servis'in bu değişikliği algılayıp gerekirse bildirimleri susturması sağlanır.
-            QFile refreshFile("/accounts/1000/shared/misc/Beeper/ui_refresh_trigger.txt");
+            QFile refreshFile("/accounts/1000/shared/misc/BerryBridge/ui_refresh_trigger.txt");
             if (refreshFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
                 refreshFile.write(QByteArray::number(QDateTime::currentMSecsSinceEpoch()));
                 refreshFile.close();
@@ -3782,15 +3930,17 @@ void Database::onSyncResponseReceived()
             upsertChat.bindValue(20, rawChat.value("isLowPriority", false).toBool() ? 1 : 0);
             upsertChat.bindValue(21, rawChat.value("messageExpirySeconds", 0).toInt());
 
-            QString participantsJsonStr = "[]";
+            QString participantsJsonStr; // saveToBuffer APPENDS: must start empty
             if (!rawChat.value("participants").isNull()) {
                 jda.saveToBuffer(rawChat.value("participants"), &participantsJsonStr);
             }
+            if (participantsJsonStr.isEmpty()) participantsJsonStr = "[]";
 
-            QString capabilitiesJsonStr = "{}";
+            QString capabilitiesJsonStr; // saveToBuffer APPENDS: must start empty
             if (!rawChat.value("capabilities").isNull()) {
                 jda.saveToBuffer(rawChat.value("capabilities"), &capabilitiesJsonStr);
             }
+            if (capabilitiesJsonStr.isEmpty()) capabilitiesJsonStr = "{}";
 
             upsertChat.bindValue(22, participantsJsonStr);
             upsertChat.bindValue(23, capabilitiesJsonStr);
@@ -3855,7 +4005,7 @@ void Database::onSyncResponseReceived()
 
     if (newMessagesCounter > 0) {
         emit messagesUpdated();
-        QFile refreshFile("/accounts/1000/shared/misc/Beeper/ui_refresh_trigger.txt");
+        QFile refreshFile("/accounts/1000/shared/misc/BerryBridge/ui_refresh_trigger.txt");
         if (refreshFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
             refreshFile.write(QByteArray::number(QDateTime::currentMSecsSinceEpoch()));
             refreshFile.close();
@@ -3865,8 +4015,8 @@ void Database::onSyncResponseReceived()
     if (m_syncTimer) {
         m_syncTimer->start(!m_nextCursor.isEmpty() ? 1000 : 60000);
         bb::system::InvokeRequest request;
-        request.setTarget("com.example.BerryBridgeUIService");
-        request.setAction("com.example.BerryBridgeUIService.DELAY_SYNC");
+        request.setTarget("it.berrybridge.service");
+        request.setAction("it.berrybridge.service.DELAY_SYNC");
         m_invokeManager->invoke(request);
     }
 
@@ -3882,8 +4032,8 @@ void Database::sendNotificationToService(
     const QString &text)
 {
     bb::system::InvokeRequest request;
-    request.setTarget("com.example.BerryBridgeUIService");
-    request.setAction("com.example.BerryBridgeUIService.CREATE_NOTIFICATION");
+    request.setTarget("it.berrybridge.service");
+    request.setAction("it.berrybridge.service.CREATE_NOTIFICATION");
 
     QVariantMap payload;
     payload["accountID"] = accountID;

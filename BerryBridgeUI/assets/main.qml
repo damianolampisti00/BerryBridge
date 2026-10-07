@@ -115,6 +115,7 @@ TabbedPane {
     
         dat.messageSentSuccessfully.connect(tabbedPane.removeActiveUpload);
         app.updateCheckCompleted.connect(tabbedPane.checkUpdate);
+        app.openChatRequested.connect(tabbedPane.openChatFromNotification);
         app.checkForUpdates();
         
         if (!dat.initRun) {
@@ -124,6 +125,21 @@ TabbedPane {
         } else {
             updateAccountTabs();
         }
+        app.takePendingChat(); // a notification may have launched the app
+    }
+
+    // A tapped message notification (ApplicationUI::onInvoked): that account's
+    // tab, then that chat.
+    function openChatFromNotification(accountID, chatID) {
+        for (var i = 0; i < tabbedPane.count(); i++) {
+            var tab = tabbedPane.at(i);
+            if (tab && tab.accountID === accountID && typeof tab.openChatById === "function") {
+                tabbedPane.activeTab = tab;
+                tab.openChatById(chatID);
+                return;
+            }
+        }
+        console.log("[MAIN-QML] notification for an account without a tab: " + accountID);
     }
     
     function checkUpdate(updateRequired,latestVersion, releaseNotes){

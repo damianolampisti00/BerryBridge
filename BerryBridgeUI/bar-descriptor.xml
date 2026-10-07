@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8" standalone="no"?>
+﻿<?xml version="1.0" encoding="utf-8" standalone="no"?>
 <!--
 
    Copyright (c) 2013-2015 BlackBerry Limited.
@@ -25,7 +25,7 @@
     <!-- A universally unique application identifier. Must be unique across
         all BlackBerry 10 applications. Using a reverse DNS-style name as the id
         is recommended. (Eg. com.example.ExampleApplication.) Required. -->
-    <id>com.AdemZengin.BerryBridge</id>
+    <id>it.berrybridge.app</id>
 
     <!-- The name that is displayed in the BlackBerry 10 application installer.
         May have multiple values for each language. See samples or xsd schema file.
@@ -37,12 +37,12 @@
         can also be 1-part or 2-part. It is not necessary to have a 3-part value.
         An updated version of application must have a versionNumber value higher
         than the previous version. Required. -->
-    <versionNumber>1.2.1</versionNumber>
+    <versionNumber>2.0.0</versionNumber>
     <platformVersion>10.2.0</platformVersion>
 
     <!-- Fourth digit segment of the package version. First three segments are
         taken from the <versionNumber> element. Must be an integer from 0 to 2^16-1 -->
-    <buildId>2</buildId>
+    <buildId>11</buildId>
 
     <!-- A string value (such as "v1", "2.5", or "Alpha 1") that represents
         the version of the application, as it should be shown to users. Optional. -->
@@ -51,14 +51,14 @@
     <!-- Description, displayed in the BlackBerry 10 application installer.
         May have multiple values for each language. See samples or xsd schema file.
         Optional. -->
-    <description>The BerryBridgeUI application</description>
+    <description>Beeper client for BlackBerry 10 (fork of Berry Bridge by Adem Zengin)</description>
 
     <!-- Copyright information. Optional. -->
     <!-- <copyright></copyright> -->
 
     <!-- Name of author which is used for signing. Must match the developer
         name of your development certificate. -->
-    <author>Adem Zengin</author>
+    <author>BBport</author>
     <configuration name="Device-Debug">
         <platformArchitecture>armle-v7</platformArchitecture>
         <entryPointType>Qnx/Elf</entryPointType>
@@ -74,10 +74,11 @@
         <platformArchitecture>armle-v7</platformArchitecture>
         <entryPointType>Qnx/Cascades</entryPointType>
 
+        <!-- staged by ../package.ps1 -->
         <asset entryPointId="BerryBridgeUI" path="arm/o.le-v7/BerryBridgeUI.so"
             entry="true" type="Qnx/Cascades">BerryBridgeUI.so</asset>
         <asset entryPointId="BerryBridgeUIService"
-            path="../BerryBridgeUIService/arm/BerryBridgeUIService"
+            path="arm/o.le-v7/BerryBridgeUIService"
             type="Qnx/Elf">BerryBridgeUIService</asset>
     </configuration>
 
@@ -115,7 +116,7 @@
         <permission system="true">_sys_headless_nostop</permission>
     </entryPoint>
 
-    <invoke-target id="com.example.BerryBridgeUIService">
+    <invoke-target id="it.berrybridge.service">
         <invoke-target-type>application.headless</invoke-target-type>
         <invoke-target-name>BerryBridgeUI Service</invoke-target-name>
         <entry-point-id>BerryBridgeUIService</entry-point-id>
@@ -125,13 +126,26 @@
             <property var="uris" value="data://local" />
         </filter>
         <filter>
-            <action>com.example.BerryBridgeUIService.RESET</action>
+            <action>it.berrybridge.service.RESET</action>
             <mime-type>*</mime-type>
             <property var="uris" value="headless:" />
         </filter>
     </invoke-target>
 
-    <invoke-target id="com.example.BerryBridgeUI">
+    <!-- Tapping a message notification opens that chat: the service puts
+         "accountID\nchatID" in the invoke data (Service::createMessageNotification),
+         ApplicationUI::onInvoked hands it to main.qml. A bound invoke needs a
+         target whose filter matches, hence this one and its private mime type. -->
+    <invoke-target id="it.berrybridge.notification">
+        <invoke-target-type>application</invoke-target-type>
+        <entry-point-id>BerryBridgeUI</entry-point-id>
+        <filter>
+            <action>bb.action.OPEN</action>
+            <mime-type>application/x-berrybridge-chat</mime-type>
+        </filter>
+    </invoke-target>
+
+    <invoke-target id="it.berrybridge.ui">
         <invoke-target-type>application</invoke-target-type>
         <invoke-target-name>BerryBridgeUI</invoke-target-name>
         <icon>
@@ -165,6 +179,8 @@
     <!-- Request permission to post notification. -->
     <permission>post_notification</permission>
     <permission>use_camera</permission>
+    <!-- voice messages (src/audio/voicerecorder.cpp) -->
+    <permission>record_audio</permission>
     <permission>access_pimdomain_contacts</permission>
     <permission>read_device_identifying_information</permission>
     <permission>access_internet</permission>
@@ -174,6 +190,7 @@
     <permission>access_shared</permission>
     <permission system="true">_sys_headless_nostop</permission>
     <env var="LD_LIBRARY_PATH" value="app/native/lib:/usr/lib/qt4/lib" />
+    <!-- Starting style only: Settings > Dark theme switches it (ApplicationUI::applyVisualStyle). -->
     <env var="CASCADES_THEME" value="bright"/>
 
 </qnx>

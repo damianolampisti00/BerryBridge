@@ -12,6 +12,8 @@
 #include <bb/system/InvokeManager>
 #include <QTimer>
 #include <QtNetwork/QNetworkConfigurationManager>
+#include <QSet>
+#include <QMap>
 
 class Database : public QObject
 {
@@ -38,7 +40,8 @@ public:
     Q_INVOKABLE void markChatAsUnread(const QString &accountID, const QString &chatID); // whatsappTab.qml'de bir chat'e giriş için tıklandığında çalışır.
     Q_INVOKABLE QVariantList getMessagesForChat(const QString &accountID, const QString &chatID, const QString &targetMsgId = "", int limit = 25, int offset = 0);
     Q_INVOKABLE void sendMessage(const QString &accountID, const QString &chatID, const QString &pendingMsgID, const QString &text = "", const QVariantMap &attachment = QVariantMap(), const QString &replyToMessageID = "");
-    Q_INVOKABLE void uploadAssetAndSend(const QString &filePath, const QString &accountID, const QString &chatID, const QString &text = "", const QString &msgId = "", const QString &replyToMessageID="");
+    // voiceDuration > 0: send it as a voice note (attachment type "voice-note") of that many seconds.
+    Q_INVOKABLE void uploadAssetAndSend(const QString &filePath, const QString &accountID, const QString &chatID, const QString &text = "", const QString &msgId = "", const QString &replyToMessageID="", double voiceDuration = 0);
     Q_INVOKABLE void openMedia(const QString &localPath);
     Q_INVOKABLE void openImage(const QString &localPath);
     Q_INVOKABLE void openDocument(const QString &localPath);
@@ -110,6 +113,7 @@ private slots:
     void onMessageSent();
     void onAttachmentDownloaded();
     void onDownloadProgress(qint64 bytesReceived);
+    void onAvatarFetched();
     void onCreateChatFinished(); // Asenkron ağ yanıtını yakalayan slot
     void onAssetUploadFinished();
     void onSendReactionFinished();
@@ -169,6 +173,22 @@ private:
 
     QString m_url;
     QString m_accessToken;
+
+    // Profile pictures (see "Profile pictures" in Database.cpp): fetched in
+    // the background, at most kAvatarParallel at a time, cached as small
+    // square thumbnails; the chat lists reload (dataRefreshRequested, batched
+    // by m_avatarRefresh) once some have arrived.
+    static QString avatarSourceFor(const QString &chatType, const QString &imgURL, const QString &participantsJson);
+    static QString avatarCachePath(const QString &src);
+    QString avatarFor(const QString &src);
+    void pumpAvatarQueue();
+    void saveAvatar(const QString &src, const QByteArray &data);
+    QStringList m_avatarQueue;
+    QSet<QString> m_avatarPending; // queued or in flight
+    QSet<QString> m_avatarFailed;  // not retried until the app restarts
+    int m_avatarActive;
+    QTimer* m_avatarRefresh;
+
     QTimer* m_syncTimer;
     QNetworkReply* m_syncReply;
     QNetworkConfigurationManager* m_netConfManager;

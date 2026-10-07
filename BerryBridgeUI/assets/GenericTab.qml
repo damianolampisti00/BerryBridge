@@ -44,7 +44,33 @@ Tab {
     }
     
     // Platform bazlı varsayılan renkleri döndüren fonksiyon
+    // Per-network chat colors, for the theme picked in Settings (app.darkTheme).
     function getDefaultColors(accID) {
+        return app.darkTheme ? darkNetworkColors(accID) : lightNetworkColors(accID);
+    }
+    function darkNetworkColors(accID) {
+        var net = accID.toLowerCase();
+        if (net.indexOf("whatsapp") !== -1) return { primary: "#21BD5C", bg: "#0B141A", bubble: "#005C4B", badge: "#21BD5C" };
+        if (net.indexOf("telegram") !== -1) return { primary: "#24A1DE", bg: "#0E1621", bubble: "#2B5278", badge: "#24A1DE" };
+        if (net.indexOf("instagram") !== -1) return { primary: "#E1306C", bg: "#121212", bubble: "#7A1F45", badge: "#E1306C" };
+        if (net.indexOf("signal") !== -1) return { primary: "#3A76F0", bg: "#121212", bubble: "#2557C7", badge: "#3A76F0" };
+        if (net.indexOf("facebook") !== -1) return { primary: "#0084FF", bg: "#121212", bubble: "#0A5AC2", badge: "#ADD8E6" };
+        if (net.indexOf("twitter") !== -1) return { primary: "#000000", bg: "#121212", bubble: "#2F3336", badge: "#000000" };
+        if (net.indexOf("gmessages") !== -1 || net.indexOf("googlemessages") !== -1  || net.indexOf("rcs") !== -1 || net.indexOf("sms") !== -1) return { primary: "#1A73E8", bg: "#121212", bubble: "#1C4B8C", badge: "#1A73E8" };
+        if (net.indexOf("googlechat") !== -1 || net.indexOf("gchat") !== -1) return { primary: "#00796B", bg: "#121212", bubble: "#004D40", badge: "#00796B" };
+        if (net.indexOf("googlevoice") !== -1 || net.indexOf("gvoice") !== -1) return { primary: "#009688", bg: "#121212", bubble: "#00695C", badge: "#009688" };
+        if (net.indexOf("linkedin") !== -1) return { primary: "#0A66C2", bg: "#1B1F23", bubble: "#0A4A8C", badge: "#0A66C2" };
+        if (net.indexOf("discord") !== -1) return { primary: "#5865F2", bg: "#36393F", bubble: "#4752C4", badge: "#5865F2" };
+        if (net.indexOf("slack") !== -1) return { primary: "#4A154B", bg: "#121212", bubble: "#3B1240", badge: "#4A154B" };
+        if (net.indexOf("irc") !== -1) return { primary: "#808080", bg: "#000000", bubble: "#333333", badge: "#808080" };
+        if (net.indexOf("matrix") !== -1) return { primary: "#0DBD8B", bg: "#121212", bubble: "#0B6E50", badge: "#0DBD8B" };
+        if (net.indexOf("imessage") !== -1) return { primary: "#34C759", bg: "#121212", bubble: "#1F7A3A", badge: "#34C759" };
+        if (net.indexOf("line") !== -1) return { primary: "#06C755", bg: "#1E2A3A", bubble: "#0A8F42", badge: "#06C755" };
+        if (net.indexOf("tumblr") !== -1) return { primary: "#36465D", bg: "#001935", bubble: "#36465D", badge: "#36465D" };
+        
+        return { primary: "#444444", bg: "#121212", bubble: "#333333", badge: "#FF0000" }; // Default
+    }
+    function lightNetworkColors(accID) {
         var net = accID.toLowerCase();
         if (net.indexOf("whatsapp") !== -1) return { primary: "#21BD5C", bg: "#E5DDD5", bubble: "#D8FDD2", badge: "#21BD5C" };
         if (net.indexOf("telegram") !== -1) return { primary: "#24A1DE", bg: "#E4ECEF", bubble: "#E1FFC7", badge: "#24A1DE" };
@@ -64,7 +90,7 @@ Tab {
         if (net.indexOf("line") !== -1) return { primary: "#06C755", bg: "#8BACD9", bubble: "#cdf4dd", badge: "#06C755" };
         if (net.indexOf("tumblr") !== -1) return { primary: "#36465D", bg: "#001935", bubble: "#d7dadf", badge: "#36465D" };
         
-        return { primary: "#444444", bg: "#FF0000", bubble: "#E0E0E0", badge: "#FF0000" }; // Default
+        return { primary: "#444444", bg: "#CCCCCC", bubble: "#E0E0E0", badge: "#FF0000" }; // Default
     }
     
     // QSettings üzerinden temayı yükleme (main.qml içinden çağrılacak)
@@ -133,6 +159,47 @@ Tab {
         }
     }
     
+    // Opens the chat page for one row of the chat list (a tap, or a notification).
+    function openChatItem(selectedItem) {
+        var chatPage = chatUIDelegate.createObject(navigationPane);
+        chatPage.accountID = selectedItem.accountID;
+        chatPage.chatID = selectedItem.chatID;
+        chatPage.chatTitle = selectedItem.displayUpper;
+        chatPage.chatType = selectedItem.chatType;
+        chatPage.readOnly = selectedItem.isReadOnly;
+        chatPage.unreadCount = selectedItem.unreadCount;
+        chatPage.mainRef = mainRef;
+
+        // Renkleri chatUI'a geçiriyoruz
+        chatPage.primaryColor = genericTab.primaryColor;
+        chatPage.chatBgColor = genericTab.chatBgColor;
+        chatPage.bubbleColor = genericTab.bubbleColor;
+
+        chatPage.loadMessages();
+        navigationPane.push(chatPage);
+    }
+
+    // A tapped notification (main.qml openChatFromNotification): the chat may
+    // be past the page of the list loaded so far, so fall back to the DB.
+    function openChatById(chatID) {
+        var top = navigationPane.top;
+        if (top && top.chatID === chatID) return; // already showing it
+        var item = null;
+        for (var i = 0; i < internalModel.size() && !item; i++) {
+            var row = internalModel.value(i);
+            if (row && row.chatID === chatID) item = row;
+        }
+        if (!item) {
+            var rows = dat.getChatListForAccount(accountID, 300, 0);
+            for (var j = 0; j < rows.length && !item; j++) {
+                if (rows[j].chatID === chatID) item = rows[j];
+            }
+        }
+        if (!item) return;
+        if (item.unreadCount > 0) dat.markChatAsRead(item.accountID, item.chatID);
+        openChatItem(item);
+    }
+
     function loadMoreChats() {
         if (!hasMoreChats || !database || !accountID) return;
         
@@ -276,22 +343,7 @@ Tab {
                         }
                     }
                     
-                    var chatPage = chatUIDelegate.createObject(navigationPane);
-                    chatPage.accountID = selectedItem.accountID;
-                    chatPage.chatID = selectedItem.chatID;
-                    chatPage.chatTitle = selectedItem.displayUpper;
-                    chatPage.chatType = selectedItem.chatType; 
-                    chatPage.readOnly = selectedItem.isReadOnly;
-                    chatPage.unreadCount = selectedItem.unreadCount;
-                    chatPage.mainRef = mainRef;
-                    
-                    // Renkleri chatUI'a geçiriyoruz
-                    chatPage.primaryColor = genericTab.primaryColor;
-                    chatPage.chatBgColor = genericTab.chatBgColor;
-                    chatPage.bubbleColor = genericTab.bubbleColor;
-                    
-                    chatPage.loadMessages();
-                    navigationPane.push(chatPage);
+                    genericTab.openChatItem(selectedItem);
                 }
                 
                 listItemComponents: [
@@ -442,8 +494,18 @@ Tab {
                                     background: Color.create(itemRoot.ListItem.view.rootTab.darkenColor(itemRoot.ListItem.view.rootTab.primaryColor, 90))
                                     verticalAlignment: VerticalAlignment.Center
                                     layout: DockLayout {}
+                                    // Profile picture (Database::avatarFor); the initial / group /
+                                    // channel icons below are only the fallback until it's cached.
+                                    ImageView {
+                                        visible: ListItemData.avatarPath ? true : false
+                                        imageSource: ListItemData.avatarPath ? ListItemData.avatarPath : ""
+                                        horizontalAlignment: HorizontalAlignment.Fill
+                                        verticalAlignment: VerticalAlignment.Fill
+                                        scalingMethod: ScalingMethod.AspectFill
+                                        loadEffect: ImageViewLoadEffect.None
+                                    }
                                     Label {
-                                        visible: ListItemData.chatType=="single"
+                                        visible: ListItemData.chatType=="single" && !ListItemData.avatarPath
                                         text: ListItemData.avatarInitial
                                         textStyle.color: Color.White
                                         textStyle.fontSize: FontSize.Large
@@ -451,7 +513,7 @@ Tab {
                                         verticalAlignment: VerticalAlignment.Center
                                     }
                                     ImageView {
-                                        visible: ListItemData.chatType=="channel"
+                                        visible: ListItemData.chatType=="channel" && !ListItemData.avatarPath
                                         imageSource: "asset:///images/channel.png"
                                         horizontalAlignment: HorizontalAlignment.Center
                                         verticalAlignment: VerticalAlignment.Center
@@ -459,7 +521,7 @@ Tab {
                                         preferredHeight: ui.sdu(8.0)
                                     }
                                     ImageView {
-                                        visible: ListItemData.chatType=="group"
+                                        visible: ListItemData.chatType=="group" && !ListItemData.avatarPath
                                         imageSource: "asset:///images/ic_group_white.png"
                                         horizontalAlignment: HorizontalAlignment.Center
                                         verticalAlignment: VerticalAlignment.Center
@@ -468,7 +530,7 @@ Tab {
                                     }
                                     ImageView {
                                         id: circle
-                                        imageSource: "asset:///images/wPro.png"
+                                        imageSource: app.colors.avatarMask
                                         horizontalAlignment: HorizontalAlignment.Fill
                                         verticalAlignment: VerticalAlignment.Fill
                                         

@@ -2,6 +2,20 @@
 
 **Berry Bridge** is a native unofficial Beeper client for rooted BlackBerry 10 devices that synchronizes your messaging accounts via the Beeper Desktop API.
 
+## 🍴 About this fork
+
+This is a fork of [adem-zengin/BerryBridge](https://github.com/adem-zengin/BerryBridge) with a few additions. It installs as a separate app (**Berry Bridge**, package `it.berrybridge.app`, data in `shared/misc/BerryBridge`), so it can sit next to the original; uninstall the original once this one works, or you will get every notification twice.
+
+What it adds:
+
+- **Notifications with Instant Preview**, and tapping a notification opens that chat (the original's notification invoke target pointed to a non-existent app).
+- **Profile pictures** for direct and group chats, fetched through Beeper Desktop's `/v1/assets/serve` and cached as small thumbnails. This also fixes the stored participant list of direct chats, which was unreadable (`JsonDataAccess::saveToBuffer` appends to the string it is given).
+- **Dark theme** (WhatsApp-like palette), selectable in **Settings > Dark theme** and applied right away; the light theme keeps the original colors.
+- **Voice messages without BerryCore**: received voice notes play inside the chat (Ogg/Opus decoded on the phone), and you can record and send your own (with an empty text field the send button becomes a microphone). Recording uses the phone's voice-recording audio path with the driver's mmap mode off, which removes the crackling it otherwise produces.
+- **`package.ps1`**: builds the app and its service from the command line into one `.bar`, and can install it on a rooted phone over SSH (`-Install`; set `$PhoneIp`/`$RootKey` in `package.config.ps1`, see `package.config.example.ps1`). It needs the BlackBerry 10 Native SDK 10.3 in `C:bndk` and Git for Windows.
+
+Credits: Berry Bridge by Adem Zengin (MIT, see `LICENSE`); the Ogg/Opus encoder and decoder come from BBport; libopus is BSD-licensed (`third_party/opus/COPYING`).
+
 ## 📱 Screenshots
 
 <table>

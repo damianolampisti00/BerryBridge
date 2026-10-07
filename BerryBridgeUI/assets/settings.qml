@@ -153,6 +153,27 @@ NavigationPane {
                         horizontalAlignment: HorizontalAlignment.Center
                         textFormat: TextFormat.Html
                     }
+
+                    // Saved by the app (QSettings "darkTheme", on by default) and
+                    // applied right away: see ApplicationUI::setDarkTheme.
+                    Container {
+                        layout: DockLayout {}
+                        horizontalAlignment: HorizontalAlignment.Fill
+                        topMargin: ui.du(3.0)
+                        minHeight: 120.0
+                        Label {
+                            text: "Dark theme"
+                            textStyle.fontWeight: FontWeight.W500
+                            verticalAlignment: VerticalAlignment.Center
+                        }
+                        ToggleButton {
+                            horizontalAlignment: HorizontalAlignment.Right
+                            verticalAlignment: VerticalAlignment.Center
+                            checked: app.darkTheme
+                            onCheckedChanged: app.darkTheme = checked
+                        }
+                        Divider { verticalAlignment: VerticalAlignment.Bottom }
+                    }
                     
                     onCreationCompleted: {
                         // C++ tarafındaki getSetting/getCredentials fonksiyonun varsa önce onu dene:
@@ -413,7 +434,7 @@ NavigationPane {
                         id: syncStatusLabel
                         text: "Select accounts above and click Initialize"
                         textStyle.fontSize: FontSize.Small
-                        textStyle.color: Color.create("#666666")
+                        textStyle.color: Color.create(app.colors.muted)
                         horizontalAlignment: HorizontalAlignment.Center
                         multiline: true
                         bottomMargin: 20.0

@@ -9,8 +9,8 @@ Page {
     property string pendingChatName: ""
     property string pendingChatPhone: ""
     property string primaryColor: "#444444"
-    property string chatBgColor: "#E5DDD5"
-    property string bubbleColor: "#d8fdd2"
+    property string chatBgColor: app.colors.chatBg
+    property string bubbleColor: app.colors.outgoing
     
     function onChatCreatedSuccessHandler(responseJson) {
         console.log("Sohbet başarıyla oluşturuldu: " + responseJson);

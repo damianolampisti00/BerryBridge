@@ -20,6 +20,7 @@
 #include <QObject>
 #include <QFileSystemWatcher>
 #include <QSettings>
+#include <QVariant>
 #include <QNetworkAccessManager>
 
 namespace bb {
@@ -43,6 +44,13 @@ class ApplicationUI: public QObject
 {
     Q_OBJECT
     Q_PROPERTY(int dbUpdateTrigger READ dbUpdateTrigger NOTIFY dbUpdateTriggerChanged)
+    // Settings > Dark theme (saved; on by default). Switches the Cascades
+    // visual style live, and `colors` -- the app's own palette, by role
+    // (chatBg, panel, incoming, quote, text, muted, sender, selection, audio,
+    // outgoing, avatarMask) -- with it. The input bar stays dark in both,
+    // as in the original.
+    Q_PROPERTY(bool darkTheme READ darkTheme WRITE setDarkTheme NOTIFY darkThemeChanged)
+    Q_PROPERTY(QVariantMap colors READ colors NOTIFY darkThemeChanged)
 
 public:
     ApplicationUI();
@@ -57,19 +65,30 @@ public:
     Q_INVOKABLE void checkForUpdates();
     Q_INVOKABLE void clearNewContent(const QString &accountId);
     Q_INVOKABLE bool hasNewContent(const QString &accountId) const;
+    // main.qml, once its tabs exist: from now on openChatRequested is emitted
+    // directly, and a chat requested before that (the notification launched
+    // the app) is emitted now.
+    Q_INVOKABLE void takePendingChat();
 
+    bool darkTheme() const;
+    void setDarkTheme(bool dark);
+    QVariantMap colors() const;
 
 signals:
+    void darkThemeChanged();
     // servis veritabanını güncelleyince olması gereken yenileme
     // main.qml burayı dinlemede
     void dbUpdateTriggerChanged();
     void updateCheckCompleted(bool updateRequired, QString latestVersion, QString releaseNotes);
     void updateCheckFailed(QString errorMessage);
+    // A tapped message notification: show this chat.
+    void openChatRequested(const QString &accountID, const QString &chatID);
 
 private slots:
     void onSystemLanguageChanged();
     void onUIRefreshTriggered(const QString &path);
     void onReplyFinished(QNetworkReply* reply);
+    void onInvoked(const bb::system::InvokeRequest &request);
 private:
     QTranslator* m_translator;
     bb::cascades::LocaleHandler* m_localeHandler;
@@ -78,6 +97,10 @@ private:
     int m_dbUpdateTrigger;
     QSettings m_settings;
     QNetworkAccessManager* m_networkManager;
+    bool m_qmlReadyForChats;
+    QString m_pendingChatAccount;
+    QString m_pendingChatID;
+    void applyVisualStyle();
     bool isVersionGreater(const QString& current, const QString& latest);
     QString formatMarkdownToHtml(const QString& markdown);
 };

@@ -19,6 +19,7 @@
 #include <bb/Application>
 #include <bb/platform/Notification>
 #include <bb/platform/NotificationDefaultApplicationSettings>
+#include <bb/platform/NotificationPriorityPolicy>
 #include <bb/system/InvokeManager>
 #include <bb/system/InvokeRequest>
 #include <bb/data/JsonDataAccess>
@@ -72,6 +73,17 @@ Service::Service() :
     m_invokeManager->connect(m_invokeManager, SIGNAL(invoked(const bb::system::InvokeRequest&)),
             this, SLOT(handleInvoke(const bb::system::InvokeRequest&)));
 
+    // Instant Preview (the pop-up banner at the top of the screen, like the
+    // system Hub apps show) is off -- toggle hidden in Settings, too -- for
+    // any app without a Hub account, unless the app opts in explicitly. Per
+    // the apply() docs this only takes effect the FIRST time it is ever
+    // called for the app (later calls are no-ops, and never override what the
+    // user has since chosen in Settings), so calling it on every start is
+    // safe. Same opt-in as BBport's NotificationManager; the UI does it too.
+    bb::platform::NotificationDefaultApplicationSettings notifySettings;
+    notifySettings.setPreview(bb::platform::NotificationPriorityPolicy::Allow);
+    notifySettings.apply();
+
     m_netConfManager = new QNetworkConfigurationManager(this);
     connect(m_netConfManager, SIGNAL(onlineStateChanged(bool)), this, SLOT(handleConnectivityChange(bool)));
 
@@ -96,33 +108,33 @@ void Service::onGlobalSslErrors(QNetworkReply *reply, const QList<QSslError> &er
 
 void Service::handleInvoke(const bb::system::InvokeRequest & request)
 {
-        if (request.action().compare("com.example.BerryBridgeUIService.PAUSE_SYNC") == 0) {
+        if (request.action().compare("it.berrybridge.service.PAUSE_SYNC") == 0) {
             qDebug() << "[service.cpp]    → Handling PAUSE_SYNC action";
             pauseSyncing();
         }
-        else if (request.action().compare("com.example.BerryBridgeUIService.DELAY_SYNC") == 0) {
+        else if (request.action().compare("it.berrybridge.service.DELAY_SYNC") == 0) {
             qDebug() << "[service.cpp]    → Handling DELAY_SYNC action";
             if (m_syncTimer) {
                 m_syncTimer->start(120000); // 2 dakika ertele
             }
         }
-        else if (request.action().compare("com.example.BerryBridgeUIService.RESUME_SYNC") == 0) {
+        else if (request.action().compare("it.berrybridge.service.RESUME_SYNC") == 0) {
             qDebug() << "[service.cpp]    → Handling RESUME_SYNC action";
             resumeSyncing();
-        }else if (request.action().compare("com.example.BerryBridgeUIService.CRED_UPDATE") == 0) {
+        }else if (request.action().compare("it.berrybridge.service.CRED_UPDATE") == 0) {
         qDebug() << "[service.cpp]    → Handling CRED_UPDATE action";
         m_settings.sync();
         m_accessToken=m_settings.value("accessToken").toString();
         m_url=m_settings.value("serverUrl").toString();
     }
-    else if (request.action().compare("com.example.BerryBridgeUIService.INIT_UPDATE") == 0) {
+    else if (request.action().compare("it.berrybridge.service.INIT_UPDATE") == 0) {
         qDebug() << "[service.cpp]    → Handling INIT_UPDATE action";
         //initDatabases();
         m_settings.sync();
         m_initRun=m_settings.value("initRun").toBool();
         qDebug() << "[service.cpp] m_initRun: "<<m_initRun;
         startPushConnection();
-    }else if (request.action() == "com.example.BerryBridgeUIService.CREATE_NOTIFICATION") {
+    }else if (request.action() == "it.berrybridge.service.CREATE_NOTIFICATION") {
 
         QByteArray data = request.data();
         bb::data::JsonDataAccess jda;
@@ -546,15 +558,17 @@ void Service::onSyncResponseReceived()
             upsertChat.bindValue(20, rawChat.value("isLowPriority", false).toBool() ? 1 : 0);
             upsertChat.bindValue(21, rawChat.value("messageExpirySeconds", 0).toInt());
 
-            QString participantsJsonStr = "[]";
+            QString participantsJsonStr; // saveToBuffer APPENDS: must start empty
             if (!rawChat.value("participants").isNull()) {
                 jda.saveToBuffer(rawChat.value("participants"), &participantsJsonStr);
             }
+            if (participantsJsonStr.isEmpty()) participantsJsonStr = "[]";
 
-            QString capabilitiesJsonStr = "{}";
+            QString capabilitiesJsonStr; // saveToBuffer APPENDS: must start empty
             if (!rawChat.value("capabilities").isNull()) {
                 jda.saveToBuffer(rawChat.value("capabilities"), &capabilitiesJsonStr);
             }
+            if (capabilitiesJsonStr.isEmpty()) capabilitiesJsonStr = "{}";
 
             upsertChat.bindValue(22, participantsJsonStr);
             upsertChat.bindValue(23, capabilitiesJsonStr);
@@ -619,7 +633,7 @@ void Service::onSyncResponseReceived()
 
     if (newMessagesCounter > 0) {
         emit messagesUpdated();
-        QFile refreshFile("/accounts/1000/shared/misc/Beeper/ui_refresh_trigger.txt");
+        QFile refreshFile("/accounts/1000/shared/misc/BerryBridge/ui_refresh_trigger.txt");
         if (refreshFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
             refreshFile.write(QByteArray::number(QDateTime::currentMSecsSinceEpoch()));
             refreshFile.close();
@@ -784,9 +798,13 @@ void Service::createMessageNotification(const QString& accountID, const QString&
 
     msgNotify->setBody(plainBody);
 
+    // Tapping it opens THIS chat (ApplicationUI::onInvoked), through the
+    // it.berrybridge.notification target declared in bar-descriptor.xml.
     bb::system::InvokeRequest invokeReq;
-    invokeReq.setTarget("com.example.BerryBeeperUI");
-    invokeReq.setAction("bb.action.START");
+    invokeReq.setTarget("it.berrybridge.notification");
+    invokeReq.setAction("bb.action.OPEN");
+    invokeReq.setMimeType("application/x-berrybridge-chat");
+    invokeReq.setData((accountID + "\n" + chatID).toUtf8());
     msgNotify->setInvokeRequest(invokeReq);
     msgNotify->notify();
     // Belleği temizle
@@ -801,7 +819,7 @@ void Service::sendStatusNotification(const QString &title, const QString &body)
     statusNotify->setBody(body.isEmpty() ? "Status Update" : body);
 
     bb::system::InvokeRequest invokeReq;
-    invokeReq.setTarget("com.example.WhatsApp");
+    invokeReq.setTarget("it.berrybridge.ui");
     invokeReq.setAction("bb.action.START");
     statusNotify->setInvokeRequest(invokeReq);
 
@@ -821,7 +839,7 @@ void Service::initDatabases() {
 
     {
         QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "messages_db_conn");
-        db.setDatabaseName("/accounts/1000/shared/misc/Beeper/messages.db");
+        db.setDatabaseName("/accounts/1000/shared/misc/BerryBridge/messages.db");
 
         if (db.open()) {
             QSqlQuery query(db);
@@ -874,7 +892,7 @@ void Service::initDatabases() {
 
     {
         QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "chats_db_conn");
-        db.setDatabaseName("/accounts/1000/shared/misc/Beeper/chats.db");
+        db.setDatabaseName("/accounts/1000/shared/misc/BerryBridge/chats.db");
 
         if (db.open()) {
             QSqlQuery query(db);
@@ -1529,7 +1547,7 @@ void Service::handlePushEvent(const QByteArray &payload)
         emit messagesUpdated();
 
         // Dosyaya yazma işlemi sonlandırılıyor
-        QFile refreshFile("/accounts/1000/shared/misc/Beeper/ui_refresh_trigger.txt");
+        QFile refreshFile("/accounts/1000/shared/misc/BerryBridge/ui_refresh_trigger.txt");
         if (refreshFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
             refreshFile.write(QByteArray::number(QDateTime::currentMSecsSinceEpoch()));
             refreshFile.close();
@@ -1681,7 +1699,7 @@ void Service::processChatAsync(const QString &msgId, const QString &chatId, cons
         QString cTitle = "Unknown chat";
         QString cType = "UNKNOWN";
         QString cAccountID = "";
-        QString participantsJsonStr = "{}";
+        QString participantsJsonStr; // saveToBuffer APPENDS: must start empty
         bb::data::JsonDataAccess jda;
 
         bool chatDbUpdated = false;
@@ -1829,7 +1847,7 @@ void Service::processChatAsync(const QString &msgId, const QString &chatId, cons
 
         if (chatDbUpdated) {
             qDebug() << "[SERVICE] Değişim işlendi - Chat:" << chatId << ", UI Refreshed!";
-            QFile refreshFile("/accounts/1000/shared/misc/Beeper/ui_refresh_trigger.txt");
+            QFile refreshFile("/accounts/1000/shared/misc/BerryBridge/ui_refresh_trigger.txt");
             if (refreshFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
                 refreshFile.write(QByteArray::number(QDateTime::currentMSecsSinceEpoch()));
                 refreshFile.close();

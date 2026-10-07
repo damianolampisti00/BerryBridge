@@ -36,7 +36,7 @@ Page {
         visible: chatPage.isEmojiPickerVisible 
         horizontalAlignment: HorizontalAlignment.Fill
         // Native klavyenin yaklaşık kapladığı alan boyutunda sabit bir yükseklik
-        background: Color.create("#E5DDD5")
+        background: Color.create(app.colors.chatBg)
         
         layout: DockLayout {}
         
@@ -64,7 +64,7 @@ Page {
                         verticalAlignment: VerticalAlignment.Fill
                         
                         // YENİ EKLENEN KISIM: Seçili olma veya basılma durumuna göre arka plan rengi
-                        background: ListItem.selected || ListItem.active ? Color.create("#C0C0C0") : Color.Transparent
+                        background: ListItem.selected || ListItem.active ? Color.create(app.colors.selection) : Color.Transparent
                         
                         Label {
                             text: ListItemData

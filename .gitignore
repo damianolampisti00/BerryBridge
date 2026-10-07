@@ -50,3 +50,9 @@ Thumbs.db
 *.exe
 *.out
 *.app
+
+# package.ps1 outputs
+/build/
+/stage/
+/*.bar
+/package.config.ps1

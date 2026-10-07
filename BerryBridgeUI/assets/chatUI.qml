@@ -31,6 +31,10 @@ Page {
     property string attachExtension
     property string attachFileName
     property string sendButtonUrl:"asset:///images/ic_microphone.png"
+    // Voice messages (voiceRecorder / voicePlayer context objects, src/audio):
+    // with an empty input field the send button records instead.
+    property bool inputEmpty: true
+    property bool voiceActive: voiceRecorder.recording || voiceRecorder.busy
     property variant attachImageSize
     property string attachFileType
     
@@ -41,8 +45,8 @@ Page {
     
     // --- TEMA DEĞİŞKENLERİ ---
     property string primaryColor: "#444444"
-    property string chatBgColor: "#E5DDD5"
-    property string bubbleColor: "#d8fdd2"
+    property string chatBgColor: app.colors.chatBg
+    property string bubbleColor: app.colors.outgoing
     property variant datObject :dat
     property alias chatPage:chatPage
     property alias eCont: editCont
@@ -408,8 +412,59 @@ Page {
             dat.markChatAsRead(accountID, chatID);
         }
     }
+    function fmtClock(ms) {
+        var s = Math.floor(Number(ms) / 1000);
+        if (!(s > 0)) s = 0;
+        return Math.floor(s / 60) + ":" + (s % 60 < 10 ? "0" : "") + (s % 60);
+    }
+
+    // A recorded voice message is ready (VoiceRecorder::finished): same optimistic
+    // pending bubble + upload path as any other attachment, sent as a voice note.
+    function sendVoice(fileUrl, seconds) {
+        var pendingMsgID = "pending_" + new Date().getTime();
+        var pendingMsg = {
+            "id": pendingMsgID,
+            "chatID": chatID,
+            "accountID": accountID,
+            "text": "",
+            "isSender": true,
+            "isSeen": false,
+            "isPending": true,
+            "type": "VOICE",
+            "timestamp": Qt.formatDateTime(new Date(), "hh:mm"),
+            "hasMention": chatPage.isReplying ? true : false,
+            "mentionSenderName": chatPage.isReplying ? (chatPage.replySender ? chatPage.replySender : "Unknown") : "",
+            "mentionText": chatPage.isReplying ? (chatPage.replyMessage ? chatPage.replyMessage : "") : "",
+            "isMentionImg": chatPage.replyAttachVisible,
+            "mentionImgRatio": chatPage.replyAttachRatio,
+            "mentionImgLocalUrl": chatPage.replyAttachImgUrl,
+            "extension": ".ogg",
+            "isDownloading": true,
+            "fileName": fileUrl.substring(fileUrl.lastIndexOf("/") + 1),
+            "fileSizeStr": fmtClock(seconds * 1000),
+            "localImagePath": fileUrl,
+            "size": {}
+        };
+        mainRef.addActiveUpload(pendingMsgID, pendingMsg);
+        dat.uploadAssetAndSend(fileUrl, accountID, chatID, "", pendingMsgID, chatPage.replyToMessageID, seconds);
+        messageModel.append(pendingMsg);
+        listView.scrollToItem([ messageModel.size() - 1 ], ScrollAnimation.Default);
+        chatPage.replyToMessageID = "";
+        chatPage.isReplying = false;
+        replyAttachVisible = false;
+    }
+
+    function showVoiceError(message) {
+        voiceToast.body = message;
+        voiceToast.show();
+    }
+
     function handleImageDownloaded(messageId, localPath) {
         console.log("[CHAT-UI] Image downloaded signal received for " + messageId);
+        if (messageId === listView.pendingVoiceId) { // tapped before it was downloaded
+            listView.pendingVoiceId = "";
+            voicePlayer.toggle(messageId, localPath);
+        }
         for (var i = 0; i < messageModel.size(); i++) {
             var item = messageModel.value(i);
             if (item.id === messageId) {
@@ -440,6 +495,11 @@ Page {
         app.dbUpdateTriggerChanged.disconnect(chatPage.handleDbUpdate);
         dat.imageDownloaded.disconnect(chatPage.handleImageDownloaded);
         dat.downloadProgress.disconnect(chatPage.handleDownloadProgress);
+        voiceRecorder.finished.disconnect(chatPage.sendVoice);
+        voiceRecorder.failed.disconnect(chatPage.showVoiceError);
+        voicePlayer.failed.disconnect(chatPage.showVoiceError);
+        voiceRecorder.cancel();
+        voicePlayer.stop();
     }
     
     titleBar: TitleBar {
@@ -450,6 +510,9 @@ Page {
     onCreationCompleted: {
         app.dbUpdateTriggerChanged.connect(chatPage.handleDbUpdate);
         dat.imageDownloaded.connect(chatPage.handleImageDownloaded);
+        voiceRecorder.finished.connect(chatPage.sendVoice);
+        voiceRecorder.failed.connect(chatPage.showVoiceError);
+        voicePlayer.failed.connect(chatPage.showVoiceError);
         dat.downloadProgress.connect(chatPage.handleDownloadProgress);
         dat.scrollToTargetRequested.connect(chatPage.executeScroll);
         //loadMessages();
@@ -495,6 +558,16 @@ Page {
                 id: listView
                 dataModel: messageModel
                 property variant rootPage: chatPage
+                // Voice playback state, mirrored here for the delegates (they reach
+                // the page only through rootMessageItem.listView).
+                property string voiceActiveId: voicePlayer.activeId
+                property bool voicePlaying: voicePlayer.playing
+                property bool voicePreparing: voicePlayer.preparing
+                property int voicePosition: voicePlayer.position
+                property int voiceDuration: voicePlayer.duration
+                property string pendingVoiceId: ""
+                function toggleVoice(id, path) { voicePlayer.toggle(id, path); }
+                function fmtClock(ms) { return chatPage.fmtClock(ms); }
                 property variant navPane: navigationPane
                 opacity: 1.0
                 
@@ -589,7 +662,7 @@ Page {
                             
                             // 2. ORTA İÇERİK: Asıl tarih balonumuz
                             Container {
-                                background: Color.create("#f5f5f5")
+                                background: Color.create(app.colors.panel)
                                 leftPadding: ui.du(2.5)
                                 rightPadding: ui.du(2.5)
                                 topPadding: ui.du(0.8)
@@ -599,7 +672,7 @@ Page {
                                     text: ListItemData.headerText
                                     textStyle.fontSize: FontSize.XSmall
                                     textStyle.fontWeight: FontWeight.W500
-                                    textStyle.color: Color.create("#444444")
+                                    textStyle.color: Color.create(app.colors.sender)
                                     // Metin çok uzunsa kendi içinde de ortalansın
                                     horizontalAlignment: HorizontalAlignment.Center
                                 }
@@ -840,7 +913,7 @@ Page {
                                     }
                                     
                                     Container {
-                                        background: ListItemData.isSender ? Color.create(rootMessageItem.listView.rootPage.bubbleColor) : Color.White
+                                        background: ListItemData.isSender ? Color.create(rootMessageItem.listView.rootPage.bubbleColor) : Color.create(app.colors.incoming)
                                         leftPadding: ui.du(1.5); rightPadding: ui.du(1.5); topPadding: ui.du(1.0); bottomPadding: ui.du(1.0)
                                         layout: StackLayout {
                                         }
@@ -859,7 +932,7 @@ Page {
                                         Container {
                                             id: mentionCont
                                             visible: ListItemData.hasMention                                   
-                                            background: ListItemData.isSender ? Color.create(rootMessageItem.listView.rootPage.darkenColor(rootMessageItem.listView.rootPage.bubbleColor,15)): Color.create("#f6f5f3")
+                                            background: ListItemData.isSender ? Color.create(rootMessageItem.listView.rootPage.darkenColor(rootMessageItem.listView.rootPage.bubbleColor,15)): Color.create(app.colors.quote)
                                             bottomMargin: ui.du(1.0)
                                             layout: StackLayout { orientation: LayoutOrientation.LeftToRight}
                                             Container {
@@ -895,7 +968,7 @@ Page {
                                                     // C++'tan gelen attachment türü veya mesaj içeriği
                                                     text: ListItemData.mentionText !== undefined ? ListItemData.mentionText : ""
                                                     textStyle.fontSize: FontSize.XSmall
-                                                    //textStyle.color: Color.Gray
+                                                    //textStyle.color: Color.create(app.colors.muted)
                                                     topMargin: 0
                                                     multiline: true
                                                     autoSize.maxLineCount: 2
@@ -938,7 +1011,7 @@ Page {
                                             property real contWidth: ListItemData.text===""?rootMessageItem.listView.displayWidth*0.5:rootMessageItem.listView.displayWidth*0.7
                                             property real contHeight: contWidth*ratio
                                             visible: (ListItemData.type && ListItemData.type === "IMAGE")
-                                            background: ListItemData.isSender ? Color.create(rootMessageItem.listView.rootPage.darkenColor(rootMessageItem.listView.rootPage.bubbleColor,15)): Color.create("#f6f5f3")
+                                            background: ListItemData.isSender ? Color.create(rootMessageItem.listView.rootPage.darkenColor(rootMessageItem.listView.rootPage.bubbleColor,15)): Color.create(app.colors.quote)
                                             preferredWidth: ListItemData.size ? contWidth : rootMessageItem.listView.displayWidth * 0.5
                                             preferredHeight: {if(ListItemData.localImagePath === undefined || ListItemData.localImagePath === "") {if (ratio>1.25){return contWidth*1.25} else{return contHeight} }
                                             else {if (ratio>1.25) return contWidth*1.25
@@ -973,7 +1046,7 @@ Page {
                                                     minHeight: ui.du(10.0)
                                                     preferredWidth: ui.du(10.0)
                                                     preferredHeight: ui.du(10.0)                                   
-                                                    filterColor: Color.DarkGray
+                                                    filterColor: Color.create(app.colors.muted)
                                                     horizontalAlignment: HorizontalAlignment.Right
                                                     verticalAlignment: VerticalAlignment.Top
                                                 }
@@ -997,7 +1070,7 @@ Page {
                                                         text:ListItemData.fileSizeStr
                                                         textStyle.fontSize: FontSize.Medium
                                                         horizontalAlignment: HorizontalAlignment.Center
-                                                        textStyle.color: Color.DarkGray
+                                                        textStyle.color: Color.create(app.colors.muted)
                                                         topMargin: 0
                                                     }
                                                 }                
@@ -1036,7 +1109,7 @@ Page {
                                             id:audioVideoCont
                                             property string upperType: ListItemData.type ? ListItemData.type.toString().toUpperCase() : ""
                                             visible: (upperType === "AUDIO" || upperType ==="VOICE" || upperType ==="VIDEO")
-                                            background: ListItemData.isSender ? Color.create(rootMessageItem.listView.rootPage.darkenColor(rootMessageItem.listView.rootPage.bubbleColor,15)): Color.create("#f6f5f3")
+                                            background: ListItemData.isSender ? Color.create(rootMessageItem.listView.rootPage.darkenColor(rootMessageItem.listView.rootPage.bubbleColor,15)): Color.create(app.colors.quote)
                                             preferredWidth:ListItemData.text===""?undefined:rootMessageItem.listView.displayWidth*0.7
                                             
                                             
@@ -1051,10 +1124,13 @@ Page {
                                             gestureHandlers: [
                                                 TapHandler {
                                                     onTapped: {
+                                                        var isAudio = (audioVideoCont.upperType === "AUDIO" || audioVideoCont.upperType === "VOICE");
                                                         if (! ListItemData.localImagePath && ListItemData.mxcUrl && ! ListItemData.isDownloading) {
+                                                            if (isAudio) rootMessageItem.listView.pendingVoiceId = ListItemData.id; // plays once downloaded
                                                             rootMessageItem.listView.requestAttachmentDownload(ListItemData.mxcUrl, ListItemData.id, ListItemData.fileName, ListItemData.type, ListItemData.extension, ListItemData.fileSize);
                                                         } else if (ListItemData.localImagePath && ListItemData.localImagePath !== "") {
-                                                                rootMessageItem.listView.playMedia(ListItemData.localImagePath);   
+                                                            if (isAudio) rootMessageItem.listView.toggleVoice(ListItemData.id, ListItemData.localImagePath);
+                                                            else rootMessageItem.listView.playMedia(ListItemData.localImagePath);
                                                         }
                                                     }
                                                 }
@@ -1076,7 +1152,7 @@ Page {
                                                     preferredHeight: ui.du(9.0)                                   
                                                     horizontalAlignment: HorizontalAlignment.Left
                                                     verticalAlignment: VerticalAlignment.Center
-                                                    filterColor: upperType === "AUDIO" || upperType ==="VOICE" ? Color.DarkBlue:Color.Red
+                                                    filterColor: upperType === "AUDIO" || upperType ==="VOICE" ? Color.create(app.colors.audio):Color.Red
                                                     rightMargin: ui.du(1.5)
                                                 }
                                                 
@@ -1091,16 +1167,27 @@ Page {
                                                         }
                                                         
                                                         Label {
-                                                            text:ListItemData.type
+                                                            property bool isActiveVoice: rootMessageItem.listView.voiceActiveId === ListItemData.id
+                                                            text: isActiveVoice
+                                                                  ? (rootMessageItem.listView.voicePreparing ? "Preparazione..."
+                                                                     : rootMessageItem.listView.fmtClock(rootMessageItem.listView.voicePosition) + " / " + rootMessageItem.listView.fmtClock(rootMessageItem.listView.voiceDuration))
+                                                                  : (audioVideoCont.upperType === "VOICE" ? "Vocale" : ListItemData.type)
                                                             textStyle.fontSize: FontSize.Small                                            
                                                             horizontalAlignment: HorizontalAlignment.Left
                                                             multiline: true
                                                             autoSize.maxLineCount: 2
                                                         }
+                                                        ProgressIndicator {
+                                                            visible: rootMessageItem.listView.voiceActiveId === ListItemData.id && rootMessageItem.listView.voiceDuration > 0
+                                                            fromValue: 0
+                                                            toValue: Math.max(1, rootMessageItem.listView.voiceDuration)
+                                                            value: rootMessageItem.listView.voicePosition
+                                                            preferredWidth: ui.du(24.0)
+                                                        }
                                                         Label {
                                                             text:ListItemData.extension ? ListItemData.fileSizeStr+" • "+ListItemData.extension.substring(1).toUpperCase():""
                                                             textStyle.fontSize: FontSize.XSmall
-                                                            textStyle.color: Color.DarkGray                                        
+                                                            textStyle.color: Color.create(app.colors.muted)                                        
                                                             topMargin: 0
                                                         }
                                                     }
@@ -1113,7 +1200,8 @@ Page {
                                                 }                                   
                                                 ImageView {
                                                     visible: !ListItemData.isDownloading
-                                                    imageSource: ListItemData.localImagePath === undefined || ListItemData.localImagePath === "" && !ListItemData.isDownloading ? "asset:///images/download.png":"asset:///images/ic_play.png"
+                                                    imageSource: (ListItemData.localImagePath === undefined || ListItemData.localImagePath === "" && !ListItemData.isDownloading) ? "asset:///images/download.png"
+                                                                 : (rootMessageItem.listView.voiceActiveId === ListItemData.id && rootMessageItem.listView.voicePlaying ? "asset:///images/ic_pause.png" : "asset:///images/ic_play.png")
                                                     preferredWidth: ui.du(8.0)
                                                     minWidth:ui.du(8.0)
                                                     preferredHeight: ui.du(8.0)
@@ -1145,7 +1233,7 @@ Page {
                                             id:fileCont
                                             property string upperType: ListItemData.type ? ListItemData.type.toString().toUpperCase() : ""
                                             visible: (upperType === "FILE")
-                                            background: ListItemData.isSender ? Color.create(rootMessageItem.listView.rootPage.darkenColor(rootMessageItem.listView.rootPage.bubbleColor,15)): Color.create("#f6f5f3")
+                                            background: ListItemData.isSender ? Color.create(rootMessageItem.listView.rootPage.darkenColor(rootMessageItem.listView.rootPage.bubbleColor,15)): Color.create(app.colors.quote)
                                             preferredWidth:ListItemData.text===""?undefined:rootMessageItem.listView.displayWidth*0.7
                                             
                                             
@@ -1223,7 +1311,7 @@ Page {
                                                         Label {
                                                             text:ListItemData.extension ? ListItemData.fileSizeStr+" • "+ListItemData.extension.substring(1).toUpperCase():""
                                                             textStyle.fontSize: FontSize.XSmall
-                                                            textStyle.color: Color.DarkGray                                        
+                                                            textStyle.color: Color.create(app.colors.muted)                                        
                                                             topMargin: 0
                                                         }
                                                     }
@@ -1274,7 +1362,7 @@ Page {
                                                 textFormat: TextFormat.Html
                                                 topMargin: 0;
                                                 bottomMargin: 0;
-                                                textStyle.color:Color.Black
+                                                textStyle.color: Color.create(app.colors.text)
                                             
                                             }
                                         }
@@ -1321,7 +1409,7 @@ Container {
 Label {
     text: ListItemData.reactionsText ? ListItemData.reactionsText : ""
     textStyle.fontSize: FontSize.XSmall
-    textStyle.color: Color.Gray
+    textStyle.color: Color.create(app.colors.muted)
     horizontalAlignment: HorizontalAlignment.Left
     
     visible: ListItemData.reactionsText && ListItemData.reactionsText !== ""
@@ -1336,7 +1424,7 @@ Label {
             return ListItemData.timestamp+" ✔";}
     textFormat: TextFormat.Html                                 
     textStyle.fontSize: FontSize.XSmall
-    textStyle.color: Color.Gray
+    textStyle.color: Color.create(app.colors.muted)
     horizontalAlignment: HorizontalAlignment.Right
 }
 
@@ -1392,6 +1480,7 @@ Label {
                             editCont.visible=false
                             attachButton.visible=true;
                             inputField.text = "";
+                            chatPage.inputEmpty = true;
                             inputField.requestFocus();
                             listView.opacity=1.0;
                             sendButtonUrl="asset:///images/ic_microphone.png";
@@ -1412,7 +1501,7 @@ Label {
                          textFormat: TextFormat.Html
                          topMargin: 0;
                          bottomMargin: 0;
-                         textStyle.color:Color.Black
+                         textStyle.color: Color.create(app.colors.text)
                      
                      }
                 }
@@ -1420,10 +1509,40 @@ Label {
             
             
             
+            // Voice message being recorded (or encoded right after "Invia"):
+            // shown in place of the bottom bar below.
+            Container {
+                id: recordBar
+                visible: chatPage.voiceActive && !chatPage.isSearchMode && !readOnly
+                background: Color.create("#ff282828")
+                horizontalAlignment: HorizontalAlignment.Fill
+                layout: StackLayout { orientation: LayoutOrientation.LeftToRight }
+                leftPadding: ui.du(2.0); rightPadding: ui.du(1.5); topPadding: ui.du(1.5); bottomPadding: ui.du(1.5)
+                Label {
+                    text: voiceRecorder.busy ? "Elaborazione..." : "\u25CF  " + chatPage.fmtClock(voiceRecorder.elapsedSeconds * 1000)
+                    textStyle.color: voiceRecorder.busy ? Color.White : Color.create("#FF5252")
+                    textStyle.fontSize: FontSize.Large
+                    verticalAlignment: VerticalAlignment.Center
+                    layoutProperties: StackLayoutProperties { spaceQuota: 1 }
+                }
+                Button {
+                    text: "Annulla"
+                    enabled: voiceRecorder.recording
+                    preferredWidth: ui.du(20.0)
+                    onClicked: voiceRecorder.cancel()
+                }
+                Button {
+                    text: "Invia"
+                    enabled: voiceRecorder.recording
+                    preferredWidth: ui.du(20.0)
+                    onClicked: voiceRecorder.stopAndEncode()
+                }
+            }
+
             // Custom Bottom Bar (Back Button + Emoji + Input + Send/Voice)
             Container {
                 id: bottomBar
-                visible: (!chatPage.isSearchMode && !readOnly)
+                visible: (!chatPage.isSearchMode && !readOnly && !chatPage.voiceActive)
                 background: Color.create("#ff282828")
                 
                 layout: StackLayout { orientation: LayoutOrientation.LeftToRight }
@@ -1467,7 +1586,7 @@ Label {
                         preferredHeight:ui.du(1.0)
                         minHeight:ui.du(1.0)
                         horizontalAlignment: HorizontalAlignment.Fill                        
-                        background: Color.create("#f5f5f5")
+                        background: Color.create(app.colors.panel)
                         bottomMargin: 0
                         visible: isReplying
                     }
@@ -1475,7 +1594,7 @@ Label {
                     Container {
                         id: replyCont
                         visible: isReplying                                  
-                        background: Color.create("#f5f5f5")
+                        background: Color.create(app.colors.panel)
                         bottomMargin: ui.du(0)
                         
                         //topPadding: ui.du(0.5)
@@ -1488,7 +1607,7 @@ Label {
                                 preferredWidth:ui.du(1.0)
                                 minWidth:ui.du(1.0)
                                 verticalAlignment: VerticalAlignment.Fill
-                                background: Color.create("#f5f5f5")
+                                background: Color.create(app.colors.panel)
                             }
                             Container {
                                 preferredWidth:ui.du(1.0)
@@ -1557,7 +1676,7 @@ Label {
                                 
                                 }
                                 textStyle.textAlign: TextAlign.Right
-                                textStyle.color: Color.DarkGray
+                                textStyle.color: Color.create(app.colors.muted)
                                 leftMargin: 0
                                 rightMargin: 0
                             
@@ -1568,7 +1687,7 @@ Label {
                             preferredWidth: ui.du(1.0)
                             minWidth: ui.du(1.0)
                             verticalAlignment: VerticalAlignment.Fill
-                            background: Color.create("#f5f5f5")
+                            background: Color.create(app.colors.panel)
                         }
                     }
                     
@@ -1590,7 +1709,7 @@ Label {
                             preferredWidth:ui.du(1.0)
                             minWidth:ui.du(1.0)
                             verticalAlignment: VerticalAlignment.Fill
-                            background: Color.create("#f5f5f5")
+                            background: Color.create(app.colors.panel)
                         }
                         
                         Container {
@@ -1602,7 +1721,7 @@ Label {
                                 preferredHeight:ui.du(1.0)
                                 minHeight:ui.du(1.0)
                                 horizontalAlignment: HorizontalAlignment.Fill
-                                background: Color.create("#f5f5f5")
+                                background: Color.create(app.colors.panel)
                             }
                             
                             Container {
@@ -1673,7 +1792,7 @@ Label {
                                         Label {
                                             text:attachFileSizeStr+" • "+attachExtension
                                             textStyle.fontSize: FontSize.XSmall
-                                            textStyle.color: Color.DarkGray                                        
+                                            textStyle.color: Color.create(app.colors.muted)                                        
                                             topMargin: 0
                                         }
                                     }
@@ -1692,7 +1811,7 @@ Label {
                                     
                                     }
                                     textStyle.textAlign: TextAlign.Right
-                                    textStyle.color: Color.DarkGray
+                                    textStyle.color: Color.create(app.colors.muted)
                                     leftMargin: 0
                                     rightMargin: 0
                                 
@@ -1704,7 +1823,7 @@ Label {
                                 preferredHeight:ui.du(1.0)
                                 minHeight:ui.du(1.0)
                                 horizontalAlignment: HorizontalAlignment.Fill
-                                background: Color.create("#f5f5f5")
+                                background: Color.create(app.colors.panel)
                             }
                             
                         }
@@ -1713,7 +1832,7 @@ Label {
                             preferredWidth:ui.du(1.0)
                             minWidth:ui.du(1.0)
                             verticalAlignment: VerticalAlignment.Fill
-                            background: Color.create("#f5f5f5")
+                            background: Color.create(app.colors.panel)
                         }
                         
                         
@@ -1729,6 +1848,7 @@ Label {
                         textFormat: TextFormat.Plain
                         
                         onTextChanging: {
+                            chatPage.inputEmpty = (text.trim().length === 0);
                             if (inputField.text.trim().length > 0) {
                                 sendButtonUrl = "asset:///images/ic_play.png";
                             } else {
@@ -1776,7 +1896,7 @@ Label {
                 ImageButton {
                     id: sendButton
                     //defaultImageSource: sendButtonUrl
-                    defaultImageSource: "asset:///images/ic_send.png";
+                    defaultImageSource: (chatPage.inputEmpty && !attachSending && !isEditing) ? "asset:///images/ic_microphone.png" : "asset:///images/ic_send.png"
                     verticalAlignment: VerticalAlignment.Center
                     preferredWidth: ui.du(8.0)
                     preferredHeight: ui.du(8.0)
@@ -1785,6 +1905,10 @@ Label {
                     
                     onClicked: {
                         var displayMsg = inputField.text.trim();
+                        if (!isEditing && !attachSending && displayMsg.length === 0) {
+                            voiceRecorder.start(); // nothing typed: record a voice message
+                            return;
+                        }
                         if (!isEditing && (attachSending || displayMsg.length > 0)) {
                             var outgoingMsg = "";
                             if (displayMsg.length > 0) {
@@ -1798,6 +1922,7 @@ Label {
                             else type = attachFileType;
                             
                             inputField.text = "";
+                            chatPage.inputEmpty = true;
                             inputField.requestFocus();
                             var pendingMsgID = "pending_" + new Date().getTime();
                             var timeS = Qt.formatDateTime(new Date(), "hh:mm");
@@ -1852,6 +1977,7 @@ Label {
                             editCont.visible=false;
                             attachButton.visible=true;
                             inputField.text = "";
+                            chatPage.inputEmpty = true;
                             inputField.requestFocus();
                             listView.opacity=1.0;
                             sendButtonUrl="asset:///images/ic_microphone.png";
@@ -1869,7 +1995,7 @@ Label {
                 horizontalAlignment: HorizontalAlignment.Fill
                 // Native klavyenin yaklaşık kapladığı alan boyutunda sabit bir yükseklik
                 preferredHeight: ui.du(38.0)
-                background: Color.create("#E5DDD5")
+                background: Color.create(app.colors.chatBg)
                 
                 layout: DockLayout {
                 }
@@ -1898,7 +2024,7 @@ Label {
                                 verticalAlignment: VerticalAlignment.Fill
                                 
                                 // YENİ EKLENEN KISIM: Seçili olma veya basılma durumuna göre arka plan rengi
-                                background: ListItem.selected || ListItem.active ? Color.create("#C0C0C0") : Color.Transparent
+                                background: ListItem.selected || ListItem.active ? Color.create(app.colors.selection) : Color.Transparent
                                 
                                 Label {
                                     text: ListItemData
@@ -1922,6 +2048,9 @@ Label {
     }
     
     attachedObjects: [
+        SystemToast {
+            id: voiceToast
+        },
         TitleBar {
             id: titleBar
             title: chatPage.chatTitle
