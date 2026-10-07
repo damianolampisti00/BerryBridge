@@ -25,3 +25,7 @@ HEADERS += src/audio/oggopusencoder.hpp src/audio/oggopusdecoder.hpp \
 INCLUDEPATH += $$quote($$_PRO_FILE_PWD_/../third_party/opus/include)
 LIBS += $$quote($$_PRO_FILE_PWD_/../third_party/opus/lib/armv7/libopus.a)
 LIBS += -lasound -laudio_manager -lbbmultimedia
+
+# --- WhatsApp calls: UI client of the service's CallService (src/call).
+SOURCES += src/call/callclient.cpp
+HEADERS += src/call/callclient.hpp

@@ -22,10 +22,11 @@ class CallLink : public QObject
 {
     Q_OBJECT
 public:
-    // uplink: captured PCM to send (0 = synthetic 440 Hz test tone);
-    // downlink: where received PCM goes (0 = discarded, stats only).
+    // uplink: captured PCM to send (0 = nothing, or a synthetic 440 Hz tone
+    // when `synthetic`); downlink: where received PCM goes (0 = discarded).
+    // echoTest: ask the gateway to send our audio straight back (TEST 2).
     CallLink(const QUrl &url, const QByteArray &token, bool verifyTls, bool echoTest,
-             AudioRing *uplink, AudioRing *downlink, int rate, QObject *parent = 0);
+             AudioRing *uplink, AudioRing *downlink, int rate, bool synthetic = false, QObject *parent = 0);
 
     // Stats (read from the controller's thread).
     QAtomicInt framesSent, framesReceived, lost, reordered, rttSumMs, rttCount, rttMinMs, rttMaxMs, backlogBytes;
@@ -34,6 +35,15 @@ public:
 public slots:
     void start();
     void stop();
+    // Control plane (JSON) to the gateway; dropped while disconnected.
+    void sendText(const QByteArray &utf8);
+    // Attach/detach the call's audio (0, 0 = none). Rings outlive the call.
+    void setAudio(AudioRing *uplink, AudioRing *downlink);
+
+signals:
+    void linkOpened();
+    void linkClosed(const QString &reason);
+    void textReceived(const QByteArray &utf8);
 
 private slots:
     void onOpened();
@@ -50,6 +60,7 @@ private:
     QByteArray m_token;
     bool m_verify;
     bool m_echo;
+    bool m_synthetic;
     AudioRing *m_uplink;
     AudioRing *m_downlink;
     int m_rate;

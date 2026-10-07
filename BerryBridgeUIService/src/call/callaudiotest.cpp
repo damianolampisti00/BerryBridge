@@ -5,6 +5,7 @@
 #include <QDebug>
 #include <QFile>
 #include <QFileSystemWatcher>
+#include <QSettings>
 #include <QTextStream>
 #include <QTimer>
 #include <bb/data/JsonDataAccess>
@@ -78,7 +79,17 @@ void CallAudioTest::onDirChanged()
         return;
     }
     stopTest();
-    if (cfg.value("mode").toString() != "stop") startTest(cfg);
+    const QString mode = cfg.value("mode").toString();
+    if (mode == "config") {
+        QSettings s;
+        s.setValue("callServerUrl", cfg.value("url").toString());
+        s.setValue("callToken", cfg.value("token").toString());
+        s.sync();
+        log("call gateway settings saved: " + cfg.value("url").toString());
+        emit configChanged();
+        return;
+    }
+    if (mode != "stop") startTest(cfg);
 }
 
 void CallAudioTest::startTest(const QVariantMap &c)
@@ -110,7 +121,7 @@ void CallAudioTest::startTest(const QVariantMap &c)
         m_downRing = new AudioRing(cfg.rate * 2);
         m_link = new CallLink(QUrl(c.value("url").toString()), c.value("token").toString().toUtf8(),
                               c.value("verify", true).toBool(), true,
-                              withAudio ? m_ring : 0, withAudio ? m_downRing : 0, cfg.rate);
+                              withAudio ? m_ring : 0, withAudio ? m_downRing : 0, cfg.rate, !withAudio);
         m_netThread = new QThread(this);
         m_link->moveToThread(m_netThread);
         connect(m_netThread, SIGNAL(started()), m_link, SLOT(start()));

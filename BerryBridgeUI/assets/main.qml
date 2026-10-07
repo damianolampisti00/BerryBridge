@@ -126,6 +126,16 @@ TabbedPane {
             updateAccountTabs();
         }
         app.takePendingChat(); // a notification may have launched the app
+
+        // WhatsApp calls: the call screen opens whenever a call needs it, and
+        // right away if one is already going on (launched from its notification).
+        callClient.callScreenNeeded.connect(function() {
+                if (!callScreen.opened) callScreen.open();
+        });
+        callClient.changed.connect(function() {
+                if (callClient.state == "idle" && callScreen.opened) callScreen.close();
+        });
+        if (callClient.state != "idle" && callClient.state != "ended") callScreen.open();
     }
 
     // A tapped message notification (ApplicationUI::onInvoked): that account's
@@ -333,6 +343,9 @@ TabbedPane {
     }
     
     attachedObjects: [
+        CallPage {
+            id: callScreen
+        },
         ComponentDefinition {
             id: settingsPageDefinition
             source: "settings.qml"

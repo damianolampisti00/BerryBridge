@@ -26,6 +26,7 @@ class QTimer;
 // remote:   mic -> gateway (wss, echo mode) -> back -> earpiece/speaker: TEST 2,
 //           needs "url" and "token" ("verify": false only to debug TLS).
 // remote-net: the same over the network only, with a synthetic 440 Hz tone.
+// config:   saves "url"/"token" as the call gateway settings (CallService).
 // Results go to calltest.log in the same folder, every 2 s and at the end.
 class CallAudioTest : public QObject
 {
@@ -33,6 +34,10 @@ class CallAudioTest : public QObject
 public:
     explicit CallAudioTest(QObject *parent = 0);
     ~CallAudioTest();
+
+signals:
+    // "config" command: callServerUrl/callToken were just saved.
+    void configChanged();
 
 private slots:
     void onDirChanged();

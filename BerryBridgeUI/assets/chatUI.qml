@@ -503,8 +503,18 @@ Page {
     }
     
     titleBar: TitleBar {
+        id: chatTitleBar
         title: chatPage.chatTitle
         scrollBehavior: TitleBarScrollBehavior.Sticky
+    }
+
+    // WhatsApp one-to-one chats get "Chiama" (callClient, WaCalls gateway);
+    // set once accountID/chatType are known (see loadMessages).
+    function setupCallAction() {
+        if (chatTitleBar.acceptAction) return;
+        if (chatPage.chatType == "single" && callClient.isWhatsAppAccount(chatPage.accountID)) {
+            chatTitleBar.acceptAction = callAction;
+        }
     }
     
     onCreationCompleted: {
@@ -2051,6 +2061,22 @@ Label {
         SystemToast {
             id: voiceToast
         },
+        ActionItem {
+            id: callAction
+            title: "Chiama"
+            onTriggered: {
+                var phone = callClient.phoneForChat(chatPage.chatID);
+                if (phone.length == 0) {
+                    voiceToast.body = "Numero di telefono non disponibile per questa chat";
+                    voiceToast.show();
+                } else if (callClient.link != "open") {
+                    voiceToast.body = "Server chiamate non collegato (" + callClient.link + ")";
+                    voiceToast.show();
+                } else {
+                    callClient.startCall(phone, chatPage.chatTitle);
+                }
+            }
+        },
         TitleBar {
             id: titleBar
             title: chatPage.chatTitle
@@ -2125,6 +2151,7 @@ Label {
     
     function loadMessages() {
         app.dismissChatNotification(chatPage.chatID);
+        setupCallAction();
         messageOffset = 0;
         hasMoreMessages = true;
         console.log("[CHAT-UI] Loading messages for account: " + chatPage.accountID + " chat: " + chatPage.chatID);

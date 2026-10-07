@@ -154,6 +154,42 @@ NavigationPane {
                         textFormat: TextFormat.Html
                     }
 
+                    // WhatsApp calls: the Berry Bridge gateway of WaCalls
+                    // (wss://.../ws) and its token. Saved, then the service reconnects.
+                    Label {
+                        text: "Calls server"
+                        textStyle.fontWeight: FontWeight.W500
+                        topMargin: ui.du(3.0)
+                    }
+                    TextField {
+                        id: callServerField
+                        hintText: "wss://calls.example.com/ws"
+                        text: app.getSetting("callServerUrl", "")
+                        inputMode: TextFieldInputMode.Url
+                        onTextChanged: {
+                            app.updateSetting("callServerUrl", text);
+                            callClient.reloadConfig();
+                        }
+                    }
+                    Label {
+                        text: "Calls token"
+                        textStyle.fontWeight: FontWeight.W500
+                    }
+                    TextField {
+                        id: callTokenField
+                        text: app.getSetting("callToken", "")
+                        inputMode: TextFieldInputMode.Password
+                        onTextChanged: {
+                            app.updateSetting("callToken", text);
+                            callClient.reloadConfig();
+                        }
+                    }
+                    Label {
+                        text: "Calls: " + callClient.link
+                        textStyle.color: Color.create(app.colors.muted)
+                        textStyle.fontSize: FontSize.Small
+                    }
+
                     // Saved by the app (QSettings "darkTheme", on by default) and
                     // applied right away: see ApplicationUI::setDarkTheme.
                     Container {

@@ -14,10 +14,10 @@ const qint64 kMaxBacklog = 32000; // ~1 s of audio waiting in the socket: drop i
 }
 
 CallLink::CallLink(const QUrl &url, const QByteArray &token, bool verifyTls, bool echoTest,
-                   AudioRing *uplink, AudioRing *downlink, int rate, QObject *parent) :
+                   AudioRing *uplink, AudioRing *downlink, int rate, bool synthetic, QObject *parent) :
         QObject(parent),
         rttMinMs(1 << 30),
-        m_url(url), m_token(token), m_verify(verifyTls), m_echo(echoTest),
+        m_url(url), m_token(token), m_verify(verifyTls), m_echo(echoTest), m_synthetic(synthetic),
         m_uplink(uplink), m_downlink(downlink), m_rate(rate),
         m_ws(0), m_pumpTimer(0), m_seq(0), m_lastRxSeq(0), m_syntheticSent(0), m_stopping(false)
 {
@@ -62,6 +62,19 @@ void CallLink::onOpened()
     m_syntheticSent = m_clock.elapsed() * m_rate / 1000; // tone starts now, no catch-up burst
     if (m_uplink) m_uplink->clear();                       // nor stale mic audio
     m_pumpTimer->start();
+    emit linkOpened();
+}
+
+void CallLink::sendText(const QByteArray &utf8)
+{
+    if (m_ws && m_ws->isOpen()) m_ws->sendText(utf8);
+}
+
+void CallLink::setAudio(AudioRing *uplink, AudioRing *downlink)
+{
+    m_uplink = uplink;
+    m_downlink = downlink;
+    if (m_uplink) m_uplink->clear();
 }
 
 void CallLink::onClosed(const QString &reason)
@@ -69,12 +82,13 @@ void CallLink::onClosed(const QString &reason)
     setState("closed: " + reason);
     if (m_pumpTimer) m_pumpTimer->stop();
     qWarning() << "[CALLLINK] closed:" << reason;
-    if (!m_stopping) QTimer::singleShot(2000, this, SLOT(reconnect()));
+    emit linkClosed(reason);
+    if (!m_stopping) QTimer::singleShot(m_echo ? 2000 : 5000, this, SLOT(reconnect()));
 }
 
 void CallLink::onText(const QByteArray &utf8)
 {
-    qDebug() << "[CALLLINK] <<" << utf8.left(200);
+    emit textReceived(utf8);
 }
 
 void CallLink::onBinary(const QByteArray &data)
@@ -109,6 +123,8 @@ void CallLink::pump()
         if (m_uplink) {
             if (m_uplink->level() < frameBytes) break;
             m_uplink->read(frame.data() + kHeader, frameBytes);
+        } else if (!m_synthetic) {
+            break;
         } else {
             // Synthetic source: 440 Hz at -12 dBFS, paced by the clock.
             const qint64 due = m_clock.elapsed() * m_rate / 1000;

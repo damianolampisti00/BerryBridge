@@ -19,6 +19,7 @@
 #include "ScreenManager.hpp"
 #include "audio/voicerecorder.hpp"
 #include "audio/voiceplayer.hpp"
+#include "call/callclient.hpp"
 
 #include <bb/cascades/Application>
 #include <bb/cascades/QmlDocument>
@@ -126,6 +127,8 @@ ApplicationUI::ApplicationUI() :
     // Voice messages: recording (PCM -> Ogg/Opus, no BerryCore) and in-chat playback.
     qml->setContextProperty("voiceRecorder", new VoiceRecorder(this));
     qml->setContextProperty("voicePlayer", new VoicePlayer(this));
+    // WhatsApp calls: client of the headless service's CallService.
+    qml->setContextProperty("callClient", new CallClient(this));
 
     // Create root object for the UI
     AbstractPane *root = qml->createRootObject<AbstractPane>();

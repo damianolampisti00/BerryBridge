@@ -16,6 +16,7 @@
 
 #include "service.hpp"
 #include "call/callaudiotest.hpp"
+#include "call/callservice.hpp"
 #include <QtNetwork/QNetworkRequest>
 #include <bb/Application>
 #include <bb/platform/Notification>
@@ -90,8 +91,11 @@ Service::Service() :
 
     QTimer::singleShot(2000, this, SLOT(startSyncLoop()));
 
-    // WhatsApp calls, step 1: the call-audio test, driven by calltest.json.
-    new CallAudioTest(this);
+    // WhatsApp calls: the call service (gateway link, ringing, audio, UI
+    // socket) and the call-audio test driven by calltest.json.
+    CallService *calls = new CallService(this);
+    CallAudioTest *callTest = new CallAudioTest(this);
+    connect(callTest, SIGNAL(configChanged()), calls, SLOT(reloadConfig()));
 
     if (m_netConfManager->isOnline()) {
         qDebug() << "[service.cpp] [NETWORK] Device is ONLINE at startup.";
