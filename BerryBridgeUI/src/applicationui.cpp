@@ -133,6 +133,14 @@ ApplicationUI::ApplicationUI() :
     // Set created root object as the application scene
     Application::instance()->setScene(root);
 
+    // Make sure the headless service runs: after an install (or a crash) the
+    // system only starts it at the next boot. Invoking it starts it; RESET is
+    // a declared action it otherwise ignores.
+    bb::system::InvokeRequest startService;
+    startService.setTarget("it.berrybridge.service");
+    startService.setAction("it.berrybridge.service.RESET");
+    m_invokeManager->invoke(startService);
+
     // Opening the app only turns off the LED / splat; each chat's message
     // stays in the Hub until that chat is opened (dismissChatNotification).
     bb::platform::Notification::clearEffectsForAll();
