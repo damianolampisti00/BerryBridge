@@ -69,6 +69,8 @@ public:
     // directly, and a chat requested before that (the notification launched
     // the app) is emitted now.
     Q_INVOKABLE void takePendingChat();
+    // A chat was opened: its notification leaves the Hub.
+    Q_INVOKABLE void dismissChatNotification(const QString &chatID);
 
     bool darkTheme() const;
     void setDarkTheme(bool dark);

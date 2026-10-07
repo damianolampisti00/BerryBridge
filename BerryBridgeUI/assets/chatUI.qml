@@ -2124,6 +2124,7 @@ Label {
     }
     
     function loadMessages() {
+        app.dismissChatNotification(chatPage.chatID);
         messageOffset = 0;
         hasMoreMessages = true;
         console.log("[CHAT-UI] Loading messages for account: " + chatPage.accountID + " chat: " + chatPage.chatID);

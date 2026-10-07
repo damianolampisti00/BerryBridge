@@ -133,11 +133,9 @@ ApplicationUI::ApplicationUI() :
     // Set created root object as the application scene
     Application::instance()->setScene(root);
 
-    using namespace bb::platform;
-    // Hem Hub'dan silinsin hem de yıldız gitsin istiyorsan:
-    Notification::deleteAllFromInbox();
-    // Sadece yıldız gitsin ama Hub'da mesajlar kalsın istiyorsan:
-    //Notification::clearEffectsForAll();
+    // Opening the app only turns off the LED / splat; each chat's message
+    // stays in the Hub until that chat is opened (dismissChatNotification).
+    bb::platform::Notification::clearEffectsForAll();
 }
 
 void ApplicationUI::onSystemLanguageChanged()
@@ -162,11 +160,9 @@ void ApplicationUI::onUIRefreshTriggered(const QString &path)
         m_uiWatcher->addPath(path);
     }
 
-    using namespace bb::platform;
-    // Hem Hub'dan silinsin hem de yıldız gitsin istiyorsan:
-    Notification::deleteAllFromInbox();
-
-    qDebug() << "[APP UI] Path";
+    // No Hub clean-up here: the service rewrites this file for EVERY incoming
+    // message, so a running UI (even minimized) used to wipe the Hub right
+    // after each notification -- the phone vibrated, the Hub stayed empty.
 
     m_dbUpdateTrigger++;
     // main.qml burayı dinlemede
@@ -271,6 +267,12 @@ QVariantMap ApplicationUI::colors() const
         c["avatarMask"] = "asset:///images/wPro.png";
     }
     return c;
+}
+
+void ApplicationUI::dismissChatNotification(const QString &chatID)
+{
+    // The service keys each chat's notification by its chatID (Service::createMessageNotification).
+    bb::platform::Notification::deleteFromInbox(chatID);
 }
 
 QVariant ApplicationUI::getSetting(const QString &key, const QVariant &defaultValue) {
