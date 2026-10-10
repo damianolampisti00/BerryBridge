@@ -33,6 +33,10 @@ public:
     Q_INVOKABLE bool getSetting(const QString &name, bool defaultValue); // whatsAppSettings.qml
     Q_INVOKABLE void initializeDatabaseSync(); // settings.qml initialize button
     Q_INVOKABLE QVariantList getSelectedAccountsForMain(); // main.qml'de tab oluşturma
+    // Active Frame (cover.qml): per enabled account {accountID, network,
+    // unread (messages), chats (chats with unread ones), muted (unread
+    // messages in muted chats)}; archived chats don't count.
+    Q_INVOKABLE QVariantList getUnreadSummary();
     Q_INVOKABLE QVariantList getChatListForAccount(const QString &accountID, int limit = 25, int offset = 0); // bir tab için chat listesini veritabanından yükleme
     Q_INVOKABLE void syncChats(const QString &cursor, QString callbackAction);
     Q_INVOKABLE void setMute(const QString &chatID, bool value);

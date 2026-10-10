@@ -327,6 +327,39 @@ QString Database::getNetworkNameByAccountID(const QString &accountID) {
     return m_settings.value("network_mapping/" + accountID, "").toString();
 }
 
+QVariantList Database::getUnreadSummary() {
+    QMap<QString, QVariantMap> counts;
+    QSqlDatabase db = QSqlDatabase::database("chats_db_conn");
+    if (db.isOpen()) {
+        QSqlQuery q(db);
+        if (q.exec("SELECT accountID, "
+                   "SUM(IFNULL(unreadCount, 0)), "
+                   "SUM(CASE WHEN IFNULL(unreadCount, 0) > 0 OR IFNULL(isMarkedUnread, 0) = 1 THEN 1 ELSE 0 END), "
+                   "SUM(CASE WHEN IFNULL(isMuted, 0) = 1 THEN IFNULL(unreadCount, 0) ELSE 0 END) "
+                   "FROM chats WHERE IFNULL(isArchived, 0) = 0 GROUP BY accountID")) {
+            while (q.next()) {
+                QVariantMap c;
+                c["unread"] = q.value(1).toInt();
+                c["chats"] = q.value(2).toInt();
+                c["muted"] = q.value(3).toInt();
+                counts[q.value(0).toString()] = c;
+            }
+        } else {
+            qWarning() << "[DATABASE] Unread summary query failed:" << q.lastError().text();
+        }
+    }
+    QVariantList out;
+    foreach (const QVariant &v, getSelectedAccountsForMain()) {
+        QVariantMap row = v.toMap();
+        const QVariantMap c = counts.value(row.value("accountID").toString());
+        row["unread"] = c.value("unread", 0).toInt();
+        row["chats"] = c.value("chats", 0).toInt();
+        row["muted"] = c.value("muted", 0).toInt();
+        out.append(row);
+    }
+    return out;
+}
+
 QVariantList Database::getChatListForAccount(const QString &accountID, int limit, int offset) {
     QVariantList chatList;
     if (accountID.isEmpty()) return chatList;

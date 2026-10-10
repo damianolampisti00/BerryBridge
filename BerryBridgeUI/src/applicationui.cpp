@@ -24,6 +24,8 @@
 #include <bb/cascades/Application>
 #include <bb/cascades/QmlDocument>
 #include <bb/cascades/AbstractPane>
+#include <bb/cascades/SceneCover>
+#include <bb/cascades/Container>
 #include <bb/cascades/LocaleHandler>
 #include <bb/system/InvokeManager>
 #include <bb/system/InvokeRequest>
@@ -135,6 +137,13 @@ ApplicationUI::ApplicationUI() :
 
     // Set created root object as the application scene
     Application::instance()->setScene(root);
+
+    // Active Frame: unread messages per account (cover.qml).
+    QmlDocument *coverQml = QmlDocument::create("asset:///cover.qml").parent(this);
+    coverQml->setContextProperty("app", this);
+    coverQml->setContextProperty("dat", dat);
+    Container *coverRoot = coverQml->createRootObject<Container>();
+    if (coverRoot) Application::instance()->setCover(SceneCover::create().content(coverRoot));
 
     // Make sure the headless service runs: after an install (or a crash) the
     // system only starts it at the next boot. Invoking it starts it; RESET is

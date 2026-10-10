@@ -13,6 +13,7 @@ What it adds:
 - **Dark theme** (WhatsApp-like palette), selectable in **Settings > Dark theme** and applied right away; the light theme keeps the original colors.
 - **Voice messages without BerryCore**: received voice notes play inside the chat (Ogg/Opus decoded on the phone), and you can record and send your own (with an empty text field the send button becomes a microphone). Recording uses the phone's voice-recording audio path with the driver's mmap mode off, which removes the crackling it otherwise produces.
 - **WhatsApp voice calls** (experimental, see [below](#-whatsapp-calls-experimental)): incoming and outgoing 1:1 calls with a call screen, through a WaCalls server.
+- **Active Frame**: the minimized app shows each account with its unread messages (archived chats left out, muted ones counted and said).
 - **Safer settings**: the sync cursor and the new-message flags, which the app and its service both rewrite all the time, moved out of the main settings file; sharing it could empty it (server, token and accounts lost).
 - **`package.ps1`**: builds the app and its service from the command line into one `.bar`, and can install it on a rooted phone over SSH (`-Install`; set `$PhoneIp`/`$RootKey` in `package.config.ps1`, see `package.config.example.ps1`). It needs the BlackBerry 10 Native SDK 10.3 in `C:bndk` and Git for Windows.
 
