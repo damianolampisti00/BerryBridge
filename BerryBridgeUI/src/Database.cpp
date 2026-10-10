@@ -1321,6 +1321,7 @@ QVariantList Database::getMessagesForChat(const QString &accountID, const QStrin
             message["text"] = msgText;
             QString msgType = query.value(3).toString();
             message["type"] = msgType;
+            message["rawTimestamp"] = query.value(2).toString(); // UTC ISO, for viewOnce.open()
             message["isSender"] = query.value(4).toBool();
             bool isSenderMain = query.value(4).toBool();
             message["isUnread"] = query.value(5).toBool();

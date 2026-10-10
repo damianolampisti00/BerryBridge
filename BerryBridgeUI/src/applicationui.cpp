@@ -20,6 +20,7 @@
 #include "audio/voicerecorder.hpp"
 #include "audio/voiceplayer.hpp"
 #include "call/callclient.hpp"
+#include "viewonce/viewonceclient.hpp"
 
 #include <bb/cascades/Application>
 #include <bb/cascades/QmlDocument>
@@ -131,6 +132,8 @@ ApplicationUI::ApplicationUI() :
     qml->setContextProperty("voicePlayer", new VoicePlayer(this));
     // WhatsApp calls: client of the headless service's CallService.
     qml->setContextProperty("callClient", new CallClient(this));
+    // Instagram view-once photos/videos (BerryBridge/igview on the server).
+    qml->setContextProperty("viewOnce", new ViewOnceClient(this));
 
     // Create root object for the UI
     AbstractPane *root = qml->createRootObject<AbstractPane>();

@@ -26,6 +26,11 @@ INCLUDEPATH += $$quote($$_PRO_FILE_PWD_/../third_party/opus/include)
 LIBS += $$quote($$_PRO_FILE_PWD_/../third_party/opus/lib/armv7/libopus.a)
 LIBS += -lasound -laudio_manager -lbbmultimedia
 
+# --- Instagram view-once media through the igview service (src/viewonce).
+SOURCES += src/viewonce/viewonceclient.cpp
+HEADERS += src/viewonce/viewonceclient.hpp
+LIBS += -lbbutility
+
 # --- WhatsApp calls: UI client of the service's CallService (src/call).
 SOURCES += src/call/callclient.cpp
 HEADERS += src/call/callclient.hpp

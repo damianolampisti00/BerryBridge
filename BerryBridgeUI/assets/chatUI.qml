@@ -518,6 +518,12 @@ Page {
     }
     
     onCreationCompleted: {
+        viewOnce.imageReady.connect(function () { viewOnceSheet.open() });
+        viewOnce.videoReady.connect(function (path) { dat.openMedia(path) });
+        viewOnce.failed.connect(function (message) {
+            voiceToast.body = message;
+            voiceToast.show();
+        });
         app.dbUpdateTriggerChanged.connect(chatPage.handleDbUpdate);
         dat.imageDownloaded.connect(chatPage.handleImageDownloaded);
         voiceRecorder.finished.connect(chatPage.sendVoice);
@@ -750,6 +756,17 @@ Page {
                                         ActionSet {
                                             title: "Message Options"
                                             //subtitle: "Message Options"
+
+                                            // Instagram view-once photo/video: Beeper only gets a
+                                            // notice, the igview server fetches it once (viewOnce).
+                                            ActionItem {
+                                                title: "Apri (visualizzazione singola)"
+                                                imageSource: "asset:///images/ic_view_image.png"
+                                                enabled: ListItemData.type === "NOTICE" && viewOnce.isViewOnceNotice(ListItemData.text)
+                                                onTriggered: {
+                                                    viewOnce.open(ListItemData.rawTimestamp ? ListItemData.rawTimestamp : new Date().toISOString())
+                                                }
+                                            }
                                             
                                             ActionItem {
                                                 title: "Copy"
@@ -2060,6 +2077,32 @@ Label {
     attachedObjects: [
         SystemToast {
             id: voiceToast
+        },
+        // A view-once photo, shown once and dropped from memory when closed.
+        Sheet {
+            id: viewOnceSheet
+            onClosed: viewOnce.clear()
+            Page {
+                titleBar: TitleBar {
+                    title: "Visualizzazione singola"
+                    dismissAction: ActionItem {
+                        title: "Chiudi"
+                        onTriggered: viewOnceSheet.close()
+                    }
+                }
+                Container {
+                    background: Color.Black
+                    layout: DockLayout {}
+                    horizontalAlignment: HorizontalAlignment.Fill
+                    verticalAlignment: VerticalAlignment.Fill
+                    ImageView {
+                        image: viewOnce.image
+                        scalingMethod: ScalingMethod.AspectFit
+                        horizontalAlignment: HorizontalAlignment.Fill
+                        verticalAlignment: VerticalAlignment.Fill
+                    }
+                }
+            }
         },
         ActionItem {
             id: callAction

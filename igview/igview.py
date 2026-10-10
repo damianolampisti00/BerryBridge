@@ -1,0 +1,221 @@
+"""igview: opens Instagram view-once photos and videos for Berry Bridge.
+
+Beeper's Instagram bridge cannot receive view-once ("raven") media: Instagram
+only hands them to its mobile app, so the bridge shows "This image can only be
+viewed once. Use the Instagram app to view." This service talks to Instagram's
+mobile API (instagrapi), with the account's existing session, and serves such
+a media exactly once:
+
+    GET /v1/open?ts=<unix seconds of the notice>      Authorization: Bearer <token>
+
+finds the unseen view-once item closest to that time (within MATCH_WINDOW_S),
+streams it to the caller and marks it seen on Instagram. Nothing is written to
+disk and nothing is cached: once opened it is gone, as on the official app.
+
+    GET /v1/pending                                   (metadata only, for checks)
+
+Setup: data/settings.json (instagrapi session, created by `login_from_feather`),
+data/token (generated on first start). Listens on 127.0.0.1:8103.
+"""
+import glob
+import json
+import logging
+import os
+import secrets
+import threading
+import time
+import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlparse
+
+from instagrapi import Client
+from instagrapi.exceptions import ChallengeRequired, LoginRequired
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+DATA = os.path.join(HERE, "data")
+SETTINGS = os.path.join(DATA, "settings.json")
+ADDR = ("127.0.0.1", int(os.environ.get("IGVIEW_PORT", "8103")))
+MATCH_WINDOW_S = 300        # a notice and its Instagram item are a few seconds apart
+THREADS_TO_SCAN = 20
+MAX_MEDIA_BYTES = 40 << 20
+MAX_FAILURES = 10           # wrong tokens per address before a lockout
+LOCKOUT_S = 15 * 60
+
+log = logging.getLogger("igview")
+_lock = threading.Lock()    # one Instagram request at a time
+_client = None
+_failures = {}
+
+
+def token():
+    path = os.path.join(DATA, "token")
+    if not os.path.exists(path):
+        with open(path, "w") as f:
+            f.write(secrets.token_urlsafe(24) + "\n")
+        os.chmod(path, 0o600)
+        log.info("new access token saved in %s", path)
+    return open(path).read().strip()
+
+
+def client():
+    global _client
+    if _client is None:
+        c = Client()
+        c.delay_range = [1, 2]
+        c.load_settings(SETTINGS)
+        c.set_locale("it_IT")
+        c.set_timezone_offset(2 * 3600)
+        _client = c
+    return _client
+
+
+def login_from_feather():
+    """(Re)creates the session from the newest Feather browser session that is
+    signed in to Instagram (its sessionid cookie): no password involved."""
+    best = None
+    for f in glob.glob(os.path.expanduser("~/server/sessions/*.json")):
+        ck = {c["name"]: c["value"] for c in json.load(open(f)).get("cookies", [])
+              if "instagram.com" in c.get("domain", "")}
+        if "sessionid" in ck and (best is None or os.path.getmtime(f) > best[0]):
+            best = (os.path.getmtime(f), ck["sessionid"])
+    if not best:
+        raise RuntimeError("no Instagram login in Feather")
+    c = Client()
+    c.delay_range = [1, 2]
+    if os.path.exists(SETTINGS):
+        c.load_settings(SETTINGS)
+    c.set_locale("it_IT")
+    c.set_timezone_offset(2 * 3600)
+    c.login_by_sessionid(best[1])
+    c.dump_settings(SETTINGS)
+    os.chmod(SETTINGS, 0o600)
+
+
+def unseen_items():
+    """Unseen view-once items in the most recent threads (raw API dicts)."""
+    c = client()
+    out = []
+    for t in c.direct_threads(amount=THREADS_TO_SCAN):
+        if not any(getattr(m, "item_type", "") == "raven_media" for m in (t.messages or [])):
+            continue
+        raw = c.private_request(f"direct_v2/threads/{t.id}/",
+                                params={"visual_message_return_type": "unseen", "direction": "older", "limit": "20"})
+        for it in raw.get("thread", {}).get("items", []):
+            vm = it.get("visual_media") or {}
+            media = vm.get("media") or {}
+            if it.get("item_type") != "raven_media" or it.get("is_sent_by_viewer"):
+                continue
+            if not (media.get("image_versions2") or media.get("video_versions")):
+                continue  # already seen (no media left) or expired
+            out.append({"thread_id": t.id, "item": it, "ts": int(it.get("timestamp", 0)) / 1e6})
+    return out
+
+
+def media_url(item):
+    media = (item.get("visual_media") or {}).get("media") or {}
+    if media.get("video_versions"):
+        v = sorted(media["video_versions"], key=lambda x: x.get("width", 0))
+        # The phone's screen is 720 px: the smallest version at least that wide.
+        pick = next((x for x in v if x.get("width", 0) >= 720), v[-1])
+        return pick["url"], "video"
+    cands = sorted(media["image_versions2"]["candidates"], key=lambda x: x.get("width", 0))
+    pick = next((x for x in cands if x.get("width", 0) >= 1080), cands[-1])
+    return pick["url"], "image"
+
+
+def mark_seen(thread_id, item_id):
+    """What the app sends after a view-once media was shown."""
+    c = client()
+    ctx = c.generate_mutation_token()
+    c.private_request(f"direct_v2/visual_threads/{thread_id}/item_seen/",
+                      data={"item_ids": f"[{item_id}]", "target_item_type": "raven_media",
+                            "_uuid": c.uuid, "client_context": ctx, "offline_threading_id": ctx},
+                      with_signature=False)
+
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, fmt, *args):
+        log.info("%s %s", self.address_string(), fmt % args)
+
+    def address_string(self):
+        return self.headers.get("CF-Connecting-IP") or self.client_address[0]
+
+    def reply(self, code, obj=None, body=None, ctype="application/json"):
+        data = body if body is not None else json.dumps(obj).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def authorized(self):
+        ip = self.address_string()
+        f = _failures.get(ip)
+        if f and f["until"] > time.time():
+            self.reply(429, {"error": "too many attempts"})
+            return False
+        if self.headers.get("Authorization", "") == "Bearer " + TOKEN:
+            _failures.pop(ip, None)
+            return True
+        f = f if f and time.time() - f["since"] < LOCKOUT_S else {"n": 0, "since": time.time(), "until": 0}
+        f["n"] += 1
+        if f["n"] >= MAX_FAILURES:
+            f["until"] = time.time() + LOCKOUT_S
+        _failures[ip] = f
+        self.reply(401, {"error": "invalid token"})
+        return False
+
+    def do_GET(self):
+        u = urlparse(self.path)
+        if u.path == "/health":
+            return self.reply(200, {"ok": True})
+        if not self.authorized():
+            return
+        q = parse_qs(u.query)
+        try:
+            with _lock:
+                if u.path == "/v1/pending":
+                    items = unseen_items()
+                    return self.reply(200, [{"ts": int(i["ts"]),
+                                             "kind": "video" if (i["item"]["visual_media"]["media"].get("video_versions")) else "image",
+                                             "view_mode": i["item"]["visual_media"].get("view_mode")} for i in items])
+                if u.path == "/v1/open":
+                    ts = float(q.get("ts", ["0"])[0])
+                    items = [i for i in unseen_items() if abs(i["ts"] - ts) <= MATCH_WINDOW_S]
+                    if not items:
+                        return self.reply(404, {"error": "not found: already viewed, expired, or not a view-once media"})
+                    best = min(items, key=lambda i: abs(i["ts"] - ts))
+                    url, kind = media_url(best["item"])
+                    with urllib.request.urlopen(url, timeout=30) as r:
+                        data = r.read(MAX_MEDIA_BYTES + 1)
+                    if len(data) > MAX_MEDIA_BYTES:
+                        return self.reply(413, {"error": "media too large"})
+                    self.reply(200, body=data, ctype="video/mp4" if kind == "video" else "image/jpeg")
+                    try:
+                        mark_seen(best["thread_id"], best["item"]["item_id"])
+                        log.info("served a view-once %s and marked it seen", kind)
+                    except Exception as e:  # shown anyway; the app on another phone would still offer it
+                        log.warning("mark seen failed: %s", type(e).__name__)
+                    return
+            return self.reply(404, {"error": "unknown path"})
+        except (ChallengeRequired, LoginRequired) as e:
+            global _client
+            _client = None
+            log.warning("Instagram wants a check: %s", type(e).__name__)
+            return self.reply(503, {"error": "instagram_check",
+                                    "message": "Instagram chiede una verifica: apri instagram.com in Feather e conferma"})
+        except Exception as e:
+            log.exception("request failed")
+            return self.reply(500, {"error": type(e).__name__})
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    os.makedirs(DATA, exist_ok=True)
+    os.chmod(DATA, 0o700)
+    TOKEN = token()
+    if not os.path.exists(SETTINGS):
+        login_from_feather()
+    log.info("igview listening on %s:%d", *ADDR)
+    ThreadingHTTPServer(ADDR, Handler).serve_forever()
