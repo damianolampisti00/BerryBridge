@@ -1616,6 +1616,9 @@ QVariantList Database::getMessagesForChat(const QString &accountID, const QStrin
                         isMentionImg = true;
                         if(isSender){
                             mentionImgLocalUrl = "/accounts/1000/shared/misc/BerryBridge/images/" + menFileName;
+                            if (!QFile::exists(mentionImgLocalUrl)) {
+                                mentionImgLocalUrl = "/accounts/1000/shared/misc/BerryBridge/images/" + linkedType + localDtMen.toString("_yyMMdd_") + linkedMessageID +"." +(menMimeType.contains("png") ? "png" : "jpg");
+                            }
                         }else{
                             mentionImgLocalUrl = "/accounts/1000/shared/misc/BerryBridge/images/" + linkedType + localDtMen.toString("_yyMMdd_") + linkedMessageID +"." +(menMimeType.contains("png") ? "png" : "jpg");
                         }
