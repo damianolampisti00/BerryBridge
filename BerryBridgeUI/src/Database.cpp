@@ -1,3 +1,4 @@
+#include <resolv.h>
 #include "Database.hpp"
 #include <QDir>
 
@@ -51,6 +52,7 @@ Database::Database(QObject *parent) : QObject(parent)
 
     m_initRun = m_settings.value("initRun", false).toBool();
     m_netManager = new QNetworkAccessManager(this);
+    connect(m_netManager, SIGNAL(finished(QNetworkReply*)), this, SLOT(onAnyReplyFinished(QNetworkReply*)));
 
     m_avatarActive = 0;
     m_avatarRefresh = new QTimer(this);
@@ -4098,4 +4100,9 @@ void Database::sendNotificationToService(
     if (m_invokeManager) {
         m_invokeManager->invoke(request);
     }
+}
+
+void Database::onAnyReplyFinished(QNetworkReply *reply)
+{
+    if (reply && reply->error() == QNetworkReply::HostNotFoundError) res_init();
 }

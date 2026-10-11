@@ -40,6 +40,7 @@ static QString stateSettingsPath()
 #include <QSqlRecord>
 #include <sys/time.h>
 #include <time.h>
+#include <resolv.h>
 
 #include <QTimer>
 
@@ -100,6 +101,7 @@ Service::Service() :
     connect(m_netConfManager, SIGNAL(onlineStateChanged(bool)), this, SLOT(handleConnectivityChange(bool)));
 
     QTimer::singleShot(2000, this, SLOT(startSyncLoop()));
+    connect(m_networkManager, SIGNAL(finished(QNetworkReply*)), this, SLOT(onAnyReplyFinished(QNetworkReply*)));
 
     // WhatsApp calls: the call service (gateway link, ringing, audio, UI socket).
     CallService *calls = new CallService(this);
@@ -1220,6 +1222,9 @@ void Service::onPushReadyRead()
 void Service::onPushError(QAbstractSocket::SocketError socketError)
 {
     qDebug() << "[service.cpp] [PUSH] Socket Error:" << m_pushSocket->errorString();
+    // The resolver reads the DNS servers once per process: after a move to
+    // another Wi-Fi every lookup fails ("Host not found") until it reloads.
+    if (socketError == QAbstractSocket::HostNotFoundError) res_init();
 
     bool wasConnected = (m_pushSocket->state() == QAbstractSocket::ConnectedState);
     m_pushSocket->abort();
@@ -1905,3 +1910,8 @@ QString Service::getTimestamp() {
     return QString::fromUtf8(result);
 }
 
+
+void Service::onAnyReplyFinished(QNetworkReply *reply)
+{
+    if (reply && reply->error() == QNetworkReply::HostNotFoundError) res_init();
+}
