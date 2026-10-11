@@ -60,6 +60,9 @@ signals:
     void messagesUpdated();
 
 private slots:
+    // Any finished request: "Host not found" reloads the DNS servers (read
+    // once per process; stale after a move to another Wi-Fi).
+    void onAnyReplyFinished(QNetworkReply *reply);
     void handleInvoke(const bb::system::InvokeRequest &);
     void handleConnectivityChange(bool isOnline);
     void performPeriodicSync();

@@ -110,6 +110,9 @@ signals:
 
 
 private slots:
+    // Any finished request: "Host not found" reloads the DNS servers (read
+    // once per process; stale after a move to another Wi-Fi).
+    void onAnyReplyFinished(QNetworkReply *reply);
     void onAccountsFetched(); // Beeper'dan hesap isimlerini çekip işler
     void onInitialMessagesFetched();
     void onChatsFetched();

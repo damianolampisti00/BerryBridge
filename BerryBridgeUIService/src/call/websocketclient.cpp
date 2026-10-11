@@ -8,6 +8,8 @@
 #include <QtNetwork/QSslSocket>
 #include <QtEndian>
 
+#include <resolv.h>
+
 namespace {
 const char *const kGuid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 const int kKeepAliveMs = 15000;   // ping this often...
@@ -291,8 +293,11 @@ void WebSocketClient::onKeepAlive()
     sendFrame(0x9, QByteArray::number(QDateTime::currentMSecsSinceEpoch()));
 }
 
-void WebSocketClient::onSocketError(QAbstractSocket::SocketError)
+void WebSocketClient::onSocketError(QAbstractSocket::SocketError error)
 {
+    // The resolver reads the DNS servers once per process: after a move to
+    // another Wi-Fi every lookup fails ("Host not found") until it reloads.
+    if (error == QAbstractSocket::HostNotFoundError) res_init();
     if (!m_socket) return;
     QString why = m_socket->errorString();
     if (!m_tlsReport.isEmpty()) why += " [TLS: " + m_tlsReport + "]";
