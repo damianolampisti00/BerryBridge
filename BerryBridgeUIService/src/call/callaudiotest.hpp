@@ -38,6 +38,9 @@ public:
 signals:
     // "config" command: callServerUrl/callToken were just saved.
     void configChanged();
+    // {"mode":"inject","event":{...}}: a gateway event, as if received
+    // (developer builds: simulate an incoming call without WhatsApp).
+    void injectEvent(const QByteArray &json);
 
 private slots:
     void onDirChanged();

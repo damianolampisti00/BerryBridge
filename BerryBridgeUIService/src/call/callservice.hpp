@@ -8,14 +8,14 @@
 #include <QVariantMap>
 
 #include "callaudio.hpp"
+#include "callringer.hpp"
 
 class CallLink;
 class QLocalServer;
 class QLocalSocket;
 class QThread;
 namespace bb {
-namespace platform { class Notification; class NotificationDialog; }
-namespace system { class InvokeManager; }
+namespace platform { class Notification; }
 }
 
 // WhatsApp calls on the phone (see the call design): the WhatsApp side runs
@@ -53,7 +53,8 @@ private slots:
     void onNewClient();
     void onClientData();
     void onClientGone();
-    void onRingDialogFinished();
+    void onRingerChosen(const QString &context);
+    void bringUpCallScreen();
     void finishEnded();
 
 private:
@@ -67,8 +68,8 @@ private:
     void stopAudio();
     void restartOutput();
     void ring(bool on);
-    void postHubNotification(const QString &title, const QString &body, const QString &key);
-    void openUi();
+    void postHubNotification(const QString &title, const QString &body, const QString &key,
+                             bool quiet = false);
     QString nameForPhone(const QString &phone) const;
     void stopLink();
 
@@ -98,8 +99,8 @@ private:
     CallAudioInput *m_input;
     CallAudioOutput *m_output;
 
-    bb::platform::NotificationDialog *m_ringDialog;
-    bb::system::InvokeManager *m_invoke;
+    CallRinger *m_ringer;
+    bool m_ongoing;
 };
 
 #endif /* CALLSERVICE_HPP_ */

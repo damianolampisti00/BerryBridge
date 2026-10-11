@@ -89,6 +89,13 @@ void CallAudioTest::onDirChanged()
         emit configChanged();
         return;
     }
+    if (mode == "inject") {
+        QString out;
+        jda.saveToBuffer(cfg.value("event"), &out);
+        log("inject " + out);
+        emit injectEvent(out.toUtf8());
+        return;
+    }
     if (mode != "stop") startTest(cfg);
 }
 
