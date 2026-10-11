@@ -459,7 +459,12 @@ QString ApplicationUI::formatMarkdownToHtml(const QString& markdown) {
 
 void ApplicationUI::onInvoked(const bb::system::InvokeRequest &request)
 {
-    if (request.mimeType() != "application/x-berrybridge-chat") return;
+    if (request.mimeType() != "application/x-berrybridge-chat") {
+        // Started from a call notification (or the app icon): main.qml shows
+        // the call screen if a call is going on.
+        emit callScreenRequested();
+        return;
+    }
     const QStringList parts = QString::fromUtf8(request.data()).split('\n');
     if (parts.size() < 2 || parts.at(1).isEmpty()) return;
     if (m_qmlReadyForChats) {

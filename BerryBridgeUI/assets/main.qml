@@ -132,6 +132,11 @@ TabbedPane {
         callClient.callScreenNeeded.connect(function() {
                 if (!callScreen.opened) callScreen.open();
         });
+        // The "in corso" Hub notification, or the app invoked while a call
+        // goes on: back to the call screen.
+        app.callScreenRequested.connect(function() {
+                if (callClient.state != "idle" && callClient.state != "ended") openCallScreen();
+        });
         callClient.changed.connect(function() {
                 if (callClient.state == "idle" && callScreen.opened) callScreen.close();
         });
@@ -160,6 +165,12 @@ TabbedPane {
         }
     }
     
+    // The call banner above the chat lists (CallBanner.qml) and the "in corso"
+    // notification bring the hidden call screen back.
+    function openCallScreen() {
+        if (!callScreen.opened) callScreen.open();
+    }
+
     function updateAccountTabs() {
         console.log("[MAIN-QML] updateAccountTabs called");
         var accountsRaw = dat.getSelectedAccountsForMain();
