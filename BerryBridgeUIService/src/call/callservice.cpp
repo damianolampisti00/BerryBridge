@@ -4,6 +4,7 @@
 #include <QDateTime>
 #include <QDebug>
 #include <QDir>
+#include <QFile>
 #include <QMetaType>
 #include <QSqlDatabase>
 #include <QSqlQuery>
@@ -333,6 +334,13 @@ void CallService::setState(State s, const QString &reason)
     m_state = s;
     if (!reason.isEmpty() || s != Ended) m_reason = reason;
     qDebug() << "[CALL] state" << kStateNames[s] << reason;
+    // Read by the UI at start (it must not clear the ringing's effects).
+    QFile flag(QDir::homePath() + "/call_ringing");
+    if (s == Incoming) {
+        if (flag.open(QIODevice::WriteOnly)) flag.close();
+    } else {
+        flag.remove();
+    }
     // A call in progress keeps a quiet Hub notification, like the phone's:
     // tapping it brings back the call screen.
     if (s == Outgoing || s == Active) {

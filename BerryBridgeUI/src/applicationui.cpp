@@ -155,7 +155,10 @@ ApplicationUI::ApplicationUI() :
 
     // Opening the app only turns off the LED / splat; each chat's message
     // stays in the Hub until that chat is opened (dismissChatNotification).
-    bb::platform::Notification::clearEffectsForAll();
+    // Not while a call rings: the call service opens the app for the call
+    // screen, and this would stop the ringing/vibration (call_ringing is
+    // written by CallService::setState).
+    if (!QFile::exists(QDir::homePath() + "/call_ringing")) bb::platform::Notification::clearEffectsForAll();
 }
 
 void ApplicationUI::onSystemLanguageChanged()
