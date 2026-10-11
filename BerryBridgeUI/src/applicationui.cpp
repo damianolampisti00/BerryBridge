@@ -78,10 +78,15 @@ ApplicationUI::ApplicationUI() :
 
     // Opt this app's notifications into Instant Preview (see the same call in
     // the service's constructor): whichever process starts first wins, the
-    // other call is a no-op.
-    bb::platform::NotificationDefaultApplicationSettings notifySettings;
-    notifySettings.setPreview(bb::platform::NotificationPriorityPolicy::Allow);
-    notifySettings.apply();
+    // other call is a no-op. Not while a call rings (the call service opened
+    // the app for the call screen): rewriting the settings makes the system
+    // reload them and stop the ringing/vibration in progress.
+    const bool callRinging = QFile::exists(QDir::homePath() + "/call_ringing");
+    if (!callRinging) {
+        bb::platform::NotificationDefaultApplicationSettings notifySettings;
+        notifySettings.setPreview(bb::platform::NotificationPriorityPolicy::Allow);
+        notifySettings.apply();
+    }
 
     // Ensure directory and generic refresh file exist before watching
     QDir dir("/accounts/1000/shared/misc/BerryBridge");
@@ -158,7 +163,7 @@ ApplicationUI::ApplicationUI() :
     // Not while a call rings: the call service opens the app for the call
     // screen, and this would stop the ringing/vibration (call_ringing is
     // written by CallService::setState).
-    if (!QFile::exists(QDir::homePath() + "/call_ringing")) bb::platform::Notification::clearEffectsForAll();
+    if (!callRinging) bb::platform::Notification::clearEffectsForAll();
 }
 
 void ApplicationUI::onSystemLanguageChanged()
