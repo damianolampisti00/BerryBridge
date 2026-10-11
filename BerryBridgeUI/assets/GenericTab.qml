@@ -315,6 +315,12 @@ Tab {
                 }
             ]
             
+            // The call banner sits above the list (indentation of the list kept
+            // as it was, to keep upstream merges simple).
+            Container {
+            CallBanner {
+                mainRef: genericTab.mainRef
+            }
             ListView {
                 id: listView
                 dataModel: internalModel
@@ -623,6 +629,7 @@ Tab {
                         }
                     }
                 ]
+            }
             }
         }
         

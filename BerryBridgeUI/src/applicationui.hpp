@@ -85,6 +85,9 @@ signals:
     void updateCheckFailed(QString errorMessage);
     // A tapped message notification: show this chat.
     void openChatRequested(const QString &accountID, const QString &chatID);
+    // Invoked by something other than a chat notification: show the call
+    // screen if there is a call.
+    void callScreenRequested();
 
 private slots:
     void onSystemLanguageChanged();
