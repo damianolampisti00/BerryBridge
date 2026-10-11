@@ -574,6 +574,8 @@ Page {
                 id: listView
                 dataModel: messageModel
                 property variant rootPage: chatPage
+                // Delegates can't see context properties: they reach it here.
+                property variant viewOnceClient: viewOnce
                 // Voice playback state, mirrored here for the delegates (they reach
                 // the page only through rootMessageItem.listView).
                 property string voiceActiveId: voicePlayer.activeId
@@ -762,9 +764,9 @@ Page {
                                             ActionItem {
                                                 title: "Apri (visualizzazione singola)"
                                                 imageSource: "asset:///images/ic_view_image.png"
-                                                enabled: ListItemData.type === "NOTICE" && viewOnce.isViewOnceNotice(ListItemData.text)
+                                                enabled: ListItemData.type === "NOTICE" && rootMessageItem.listView.viewOnceClient.isViewOnceNotice(ListItemData.text)
                                                 onTriggered: {
-                                                    viewOnce.open(ListItemData.rawTimestamp ? ListItemData.rawTimestamp : new Date().toISOString())
+                                                    rootMessageItem.listView.viewOnceClient.open(ListItemData.rawTimestamp ? ListItemData.rawTimestamp : new Date().toISOString())
                                                 }
                                             }
                                             
@@ -2070,6 +2072,33 @@ Label {
                     }
                 }
             }
+        // Opening a view-once photo/video (viewOnce.busy): it can take a few
+        // seconds, the server fetches it from Instagram first.
+        Container {
+            visible: viewOnce.busy
+            horizontalAlignment: HorizontalAlignment.Center
+            verticalAlignment: VerticalAlignment.Center
+            background: Color.create("#E0202020")
+            leftPadding: 40
+            rightPadding: 40
+            topPadding: 30
+            bottomPadding: 30
+            layout: StackLayout {
+                orientation: LayoutOrientation.LeftToRight
+            }
+            ActivityIndicator {
+                running: viewOnce.busy
+                preferredWidth: 80
+                preferredHeight: 80
+                verticalAlignment: VerticalAlignment.Center
+            }
+            Label {
+                leftMargin: 24
+                text: "Apro la visualizzazione singola..."
+                verticalAlignment: VerticalAlignment.Center
+                textStyle.color: Color.White
+            }
+        }
         }
                 
     }
