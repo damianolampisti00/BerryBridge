@@ -12,8 +12,8 @@
 //  - lockBehaviour "show" on the buttons, so Rispondi/Rifiuta work on the lock
 //    screen without unlocking (the library always sends "hide"; the service
 //    knows hide, show and unlock),
-//  - levelOnePriority: it rings and vibrates with the Level 1 settings, like a
-//    phone call, also in the Silent profile.
+// Sound and vibration follow the active profile and Berry Bridge's
+// notification settings (levelOnePriority would ring also in Silent).
 // Closing the connection cancels the dialog (the service then cancels it by
 // itself), so stop() just closes it.
 //

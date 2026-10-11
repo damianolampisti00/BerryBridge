@@ -25,7 +25,7 @@ Berry Bridge can make and receive **WhatsApp voice calls** on the BlackBerry. Be
 WhatsApp <-> WaCalls (linked device of your account) <-> gateway (wss, token) <-> Berry Bridge service <-> mic / earpiece / speaker
 ```
 
-- **Incoming calls**: like a phone call, the screen turns on and a system dialog with *Rispondi* / *Rifiuta* shows up, also on the lock screen (the password prompt appears with it if the phone is locked with one). It rings and vibrates with the Level 1 settings, so also in the Silent profile. The call screen comes to the front, plus a Hub notification (and a missed-call one if you don't answer). The call also rings on your main phone, as on any linked device.
+- **Incoming calls**: like a phone call, the screen turns on and a system dialog with *Rispondi* / *Rifiuta* shows up, also on the lock screen (the password prompt appears with it if the phone is locked with one). Sound and vibration follow the active profile and Berry Bridge's notification settings (Settings > Notifications). The call screen comes to the front, plus a Hub notification (and a missed-call one if you don't answer). The call also rings on your main phone, as on any linked device.
 - **Outgoing calls**: *Chiama* in the title bar of WhatsApp one-to-one chats (the number comes from Beeper's participant list).
 - **In a call**: timer, mute, speaker/earpiece, hang up. The call lives in the headless service, so hiding the screen or closing the app doesn't end it. A quiet "Chiamata WhatsApp in corso" notification in the Hub brings the call screen back.
 - **Audio**: 16 kHz mono PCM both ways, 20 ms blocks up, a jitter buffer down, the system's voice audio path; the gateway levels the peer's voice. About 10% CPU on a Q10. The certificate of the gateway is verified.
