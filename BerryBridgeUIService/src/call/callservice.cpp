@@ -415,10 +415,12 @@ void CallService::ring(bool on)
     }
     if (m_ringer->isRinging()) return;
     const QString who = m_name.isEmpty() ? (m_phone.isEmpty() ? QString("Numero sconosciuto") : m_phone) : m_name;
+    // The Hub item first and quiet: a notification with effects posted after
+    // the dialog replaced the dialog's repeating ring/vibration after one buzz.
+    postHubNotification("Chiamata WhatsApp in arrivo", who, "call-ringing", true);
     // The system dialog with Rispondi/Rifiuta, also on the lock screen.
     m_ringer->ring("Chiamata WhatsApp", who);
     m_ringer->wakeScreen("Chiamata WhatsApp da " + who);
-    postHubNotification("Chiamata WhatsApp in arrivo", who, "call-ringing");
     // Like a phone app, the call screen comes to the front -- once the screen
     // is on (with the screen off the navigator starts it in the background).
     QTimer::singleShot(1500, this, SLOT(bringUpCallScreen()));
