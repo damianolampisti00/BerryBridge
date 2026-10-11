@@ -117,13 +117,20 @@ void CallRinger::poll()
 
 void CallRinger::invokeItem(const QString &itemId)
 {
+    const QByteArray msg = "msg::invokeItem\nid::invoke\ndat:json:{\"itemId\":\"" + itemId.toUtf8() + "\"}\n";
+    // While ringing, on the dialog's own connection: closing another
+    // connection of this app made the service drop the dialog's effects
+    // (the ringing/vibration stopped a few seconds in).
+    if (m_fd >= 0) {
+        if (!writeAll(m_fd, msg)) qWarning() << "[CALL] invokeItem: write failed" << strerror(errno);
+        return;
+    }
     closeInvoke();
     m_invokeFd = ::open(kNotifyControl, O_RDWR | O_NONBLOCK);
     if (m_invokeFd < 0) {
         qWarning() << "[CALL] invokeItem: open" << strerror(errno);
         return;
     }
-    const QByteArray msg = "msg::invokeItem\nid::invoke\ndat:json:{\"itemId\":\"" + itemId.toUtf8() + "\"}\n";
     if (!writeAll(m_invokeFd, msg)) qWarning() << "[CALL] invokeItem: write failed" << strerror(errno);
     // Kept open a moment: the service handles the request asynchronously.
     QTimer::singleShot(3000, this, SLOT(closeInvoke()));
