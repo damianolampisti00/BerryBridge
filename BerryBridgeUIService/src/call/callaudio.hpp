@@ -22,6 +22,7 @@ struct CallAudioConfig
     QString capture; // PCM device name ("voicec", "voice_procc"...); empty = preferred
     QString playback;// PCM device name ("voicep", "voice_procp"...); empty = preferred
     QString output;  // preferred output device ("handset", "speaker"...); empty = the type's default
+    QString input;   // preferred input device ("handset", "btsco", "headset"); empty = unchanged
     QString dumpPrefix; // non-empty: raw PCM of what is captured/played goes to <prefix>capture.raw/playback.raw
     int bytesPerFrag() const { return rate * 2 * fragMs / 1000; }
 };
