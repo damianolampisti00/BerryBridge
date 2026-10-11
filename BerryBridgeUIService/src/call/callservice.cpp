@@ -14,16 +14,13 @@
 
 #include <bb/data/JsonDataAccess>
 #include <bb/platform/Notification>
-#include <bb/platform/NotificationDialog>
-#include <bb/platform/NotificationResult>
-#include <bb/system/InvokeManager>
+#include <bb/platform/NotificationType>
 #include <bb/system/InvokeRequest>
 #include <bb/system/SystemUiButton>
 
 Q_DECLARE_METATYPE(AudioRing *)
 
 using bb::platform::Notification;
-using bb::platform::NotificationDialog;
 
 namespace {
 const char *const kStateNames[] = { "idle", "incoming", "outgoing", "active", "ended" };
@@ -43,10 +40,11 @@ CallService::CallService(QObject *parent) :
         m_server(new QLocalServer(this)),
         m_state(Idle), m_since(0), m_muted(false), m_speaker(false), m_answered(false),
         m_upRing(0), m_downRing(0), m_input(0), m_output(0),
-        m_ringDialog(0),
-        m_invoke(new bb::system::InvokeManager(this))
+        m_ringer(new CallRinger(this)),
+        m_ongoing(false)
 {
     qRegisterMetaType<AudioRing *>("AudioRing*");
+    connect(m_ringer, SIGNAL(chosen(QString)), this, SLOT(onRingerChosen(QString)));
 
     // Call audio: WaCalls' format (16 kHz mono S16), the voice path of the
     // audio manager (routed and prioritised like a phone call).
@@ -179,11 +177,7 @@ void CallService::onGatewayText(const QByteArray &utf8)
         m_since = 0;
         m_reason.clear();
         setState(Incoming);
-        ring(true);
-        // Like a phone app: the call screen (Rispondi/Rifiuta) comes to the
-        // front. The system dialog from this headless process is not enough
-        // on its own (it didn't show on the Q10).
-        openUi();
+        ring(true); // also brings the call screen to the front
     } else if (type == "call.started") {
         if (m_state == Outgoing) m_callId = id;
     } else if (type == "call.state") {
@@ -339,6 +333,18 @@ void CallService::setState(State s, const QString &reason)
     m_state = s;
     if (!reason.isEmpty() || s != Ended) m_reason = reason;
     qDebug() << "[CALL] state" << kStateNames[s] << reason;
+    // A call in progress keeps a quiet Hub notification, like the phone's:
+    // tapping it brings back the call screen.
+    if (s == Outgoing || s == Active) {
+        if (!m_ongoing) {
+            m_ongoing = true;
+            postHubNotification("Chiamata WhatsApp in corso", m_name.isEmpty() ? m_phone : m_name,
+                                "call-ongoing", true);
+        }
+    } else if (m_ongoing) {
+        m_ongoing = false;
+        Notification::deleteFromInbox("call-ongoing");
+    }
     broadcast();
     if (s == Ended) QTimer::singleShot(4000, this, SLOT(finishEnded()));
 }
@@ -395,52 +401,42 @@ void CallService::restartOutput()
 void CallService::ring(bool on)
 {
     if (!on) {
-        if (m_ringDialog) {
-            m_ringDialog->disconnect(this);
-            m_ringDialog->cancel();
-            m_ringDialog->deleteLater();
-            m_ringDialog = 0;
-        }
+        m_ringer->stop();
         Notification::deleteFromInbox("call-ringing");
         return;
     }
-    if (m_ringDialog) return;
+    if (m_ringer->isRinging()) return;
     const QString who = m_name.isEmpty() ? (m_phone.isEmpty() ? QString("Numero sconosciuto") : m_phone) : m_name;
-    m_ringDialog = new NotificationDialog(this);
-    m_ringDialog->setTitle("Chiamata WhatsApp");
-    m_ringDialog->setBody(who);
-    m_ringDialog->setRepeat(true); // keeps ringing/vibrating until answered
-    m_ringDialog->appendButton(new bb::system::SystemUiButton("Rispondi", m_ringDialog));
-    m_ringDialog->appendButton(new bb::system::SystemUiButton("Rifiuta", m_ringDialog));
-    connect(m_ringDialog, SIGNAL(finished(bb::platform::NotificationResult::Type)), this, SLOT(onRingDialogFinished()));
-    m_ringDialog->show();
+    // The system dialog with Rispondi/Rifiuta, also on the lock screen.
+    m_ringer->ring("Chiamata WhatsApp", who);
+    m_ringer->wakeScreen("Chiamata WhatsApp da " + who);
     postHubNotification("Chiamata WhatsApp in arrivo", who, "call-ringing");
+    // Like a phone app, the call screen comes to the front -- once the screen
+    // is on (with the screen off the navigator starts it in the background).
+    QTimer::singleShot(1500, this, SLOT(bringUpCallScreen()));
 }
 
-void CallService::onRingDialogFinished()
+void CallService::bringUpCallScreen()
 {
-    NotificationDialog *dialog = qobject_cast<NotificationDialog *>(sender());
-    if (!dialog || dialog != m_ringDialog) return;
-    bb::system::SystemUiButton *b = dialog->buttonSelection();
-    const QString label = b ? b->label() : QString();
-    m_ringDialog = 0;
-    dialog->deleteLater();
-    QVariantMap cmd;
-    if (label == "Rispondi") {
-        cmd["cmd"] = "accept";
-        handleCommand(cmd);
-        openUi();
-    } else if (label == "Rifiuta") {
-        cmd["cmd"] = "reject";
-        handleCommand(cmd);
-    } else {
-        openUi(); // dismissed some other way: show the call screen to decide there
-    }
+    if (m_state == Incoming) m_ringer->invokeItem("call-ringing");
 }
 
-void CallService::postHubNotification(const QString &title, const QString &body, const QString &key)
+void CallService::onRingerChosen(const QString &context)
+{
+    if (m_state != Incoming) return;
+    QVariantMap cmd;
+    cmd["cmd"] = (context == "answer") ? "accept" : "reject";
+    handleCommand(cmd);
+    // Answered from the dialog: the call screen comes to the front (through
+    // the "in corso" notification, posted by setState(Active)).
+    if (context == "answer") m_ringer->invokeItem("call-ongoing");
+}
+
+void CallService::postHubNotification(const QString &title, const QString &body, const QString &key,
+                                      bool quiet)
 {
     Notification *n = new Notification(key, this);
+    if (quiet) n->setType(bb::platform::NotificationType::AllAlertsOff);
     n->setTitle(title);
     n->setBody(body);
     bb::system::InvokeRequest req;
@@ -451,15 +447,6 @@ void CallService::postHubNotification(const QString &title, const QString &body,
     n->deleteLater();
 }
 
-void CallService::openUi()
-{
-    // The UI opens the call screen by itself once its CallClient connects
-    // and sees a call in progress.
-    bb::system::InvokeRequest req;
-    req.setTarget("it.berrybridge.ui");
-    req.setAction("bb.action.START");
-    m_invoke->invoke(req);
-}
 
 QString CallService::nameForPhone(const QString &phone) const
 {

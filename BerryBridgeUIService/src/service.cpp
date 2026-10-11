@@ -109,6 +109,7 @@ Service::Service() :
     // there could otherwise reconfigure the call gateway or stream the mic.
     CallAudioTest *callTest = new CallAudioTest(this);
     connect(callTest, SIGNAL(configChanged()), calls, SLOT(reloadConfig()));
+    connect(callTest, SIGNAL(injectEvent(QByteArray)), calls, SLOT(onGatewayText(QByteArray)));
 #else
     Q_UNUSED(calls);
 #endif
