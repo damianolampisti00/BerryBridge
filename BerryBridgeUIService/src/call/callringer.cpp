@@ -60,7 +60,6 @@ bool CallRinger::ring(const QString &title, const QString &body)
     dat["title"] = title;
     dat["subtitle"] = body;
     dat["repeating"] = "on";             // rings until answered
-    dat["levelOnePriority"] = "true";    // Level 1 sound/vibration, as a call
     QVariantList choices;
     choices << choice("answer", "Rispondi") << choice("reject", "Rifiuta");
     dat["promptChoices"] = choices;
