@@ -7,6 +7,8 @@
 #include <QSettings>
 #include <QVariantMap>
 
+class QTimer;
+
 #include "callaudio.hpp"
 #include "callringer.hpp"
 
@@ -55,6 +57,7 @@ private slots:
     void onClientGone();
     void onRingerChosen(const QString &context);
     void bringUpCallScreen();
+    void checkRoute();
     void finishEnded();
 
 private:
@@ -101,6 +104,7 @@ private:
 
     CallRinger *m_ringer;
     bool m_ongoing;
+    QTimer *m_routeTimer;
 };
 
 #endif /* CALLSERVICE_HPP_ */

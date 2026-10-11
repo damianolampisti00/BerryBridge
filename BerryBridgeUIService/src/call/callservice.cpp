@@ -42,7 +42,8 @@ CallService::CallService(QObject *parent) :
         m_state(Idle), m_since(0), m_muted(false), m_speaker(false), m_answered(false),
         m_upRing(0), m_downRing(0), m_input(0), m_output(0),
         m_ringer(new CallRinger(this)),
-        m_ongoing(false)
+        m_ongoing(false),
+        m_routeTimer(new QTimer(this))
 {
     qRegisterMetaType<AudioRing *>("AudioRing*");
     connect(m_ringer, SIGNAL(chosen(QString)), this, SLOT(onRingerChosen(QString)));
@@ -54,6 +55,11 @@ CallService::CallService(QObject *parent) :
     m_audioCfg.jitterMs = 120; // the server sends 60 ms frames
     m_audioCfg.type = "voice";
     m_audioCfg.output = "handset";
+    m_audioCfg.input = "handset";
+    // During a call: a Bluetooth headset or a wired one plugged in or out
+    // moves the call there, as on the phone app.
+    m_routeTimer->setInterval(1000);
+    connect(m_routeTimer, SIGNAL(timeout()), this, SLOT(checkRoute()));
 
     const QString path = socketPath();
     QLocalServer::removeServer(path);
@@ -301,8 +307,7 @@ void CallService::handleCommand(const QVariantMap &cmd)
         broadcast();
     } else if (c == "speaker") {
         m_speaker = cmd.value("on").toBool();
-        m_audioCfg.output = m_speaker ? "speaker" : "handset";
-        restartOutput();
+        checkRoute();
         broadcast();
     }
 }
@@ -318,6 +323,7 @@ QVariantMap CallService::statusMap() const
     m["since"] = m_since;
     m["muted"] = m_muted;
     m["speaker"] = m_speaker;
+    m["route"] = m_audioCfg.output; // handset speaker btsco headset headphone
     m["reason"] = m_reason;
     m["link"] = m_linkState;
     return m;
@@ -367,9 +373,49 @@ void CallService::finishEnded()
 
 // --- audio -------------------------------------------------------------------
 
+// The call's devices: the speaker when asked for; otherwise a Bluetooth
+// headset (hands-free profile), then a wired headset or headphones, then the
+// earpiece -- read from the audio service's device objects.
+namespace {
+bool deviceConnected(const char *name)
+{
+    QFile f(QString("/pps/services/audio/devices/") + name);
+    return f.open(QIODevice::ReadOnly) && f.readAll().contains("connected:b:true");
+}
+}
+
+void CallService::checkRoute()
+{
+    QString out = "handset", in = "handset";
+    if (m_speaker) {
+        out = "speaker";
+    } else if (deviceConnected("btsco")) {
+        out = in = "btsco";
+    } else if (deviceConnected("headset")) {
+        out = in = "headset";
+    } else if (deviceConnected("headphone")) {
+        out = "headphone";
+    }
+    if (out == m_audioCfg.output && in == m_audioCfg.input) return;
+    qDebug() << "[CALL] route" << out << in;
+    m_audioCfg.output = out;
+    m_audioCfg.input = in;
+    if (!m_input) return; // used by the next startAudio()
+    // Reopen both directions on the new devices; the rings and the network
+    // link stay as they are.
+    m_input->requestStop();
+    m_input->wait(2000);
+    delete m_input;
+    m_input = new CallAudioInput(m_audioCfg, m_upRing, this);
+    m_input->start(QThread::TimeCriticalPriority);
+    restartOutput();
+}
+
 void CallService::startAudio()
 {
     if (m_input) return;
+    checkRoute();
+    m_routeTimer->start();
     m_upRing = new AudioRing(m_audioCfg.rate * 2);   // 1 s
     m_downRing = new AudioRing(m_audioCfg.rate * 2);
     m_input = new CallAudioInput(m_audioCfg, m_upRing, this);
@@ -382,6 +428,7 @@ void CallService::startAudio()
 
 void CallService::stopAudio()
 {
+    m_routeTimer->stop();
     if (!m_input && !m_output) return;
     // Detach from the network thread FIRST (blocking), so it never touches
     // the rings after they are freed.

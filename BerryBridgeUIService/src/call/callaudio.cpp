@@ -43,10 +43,13 @@ snd_pcm_t *openPcm(const CallAudioConfig &cfg, bool capture, unsigned int *audio
             QByteArray n = name.toLatin1();
             rc = audio_manager_snd_pcm_open_name(type, &pcm, audioman, n.data(), mode);
         }
-        if (rc >= 0 && *audioman && !cfg.output.isEmpty()) {
-            const audio_manager_device_t out = audio_manager_get_device_from_name(cfg.output.toLatin1().constData());
-            const int r2 = audio_manager_set_handle_type(*audioman, type, out, AUDIO_DEVICE_UNCHANGED);
-            if (r2 < 0) qWarning() << "[CALLAUDIO] set_handle_type" << cfg.output << "failed:" << r2;
+        if (rc >= 0 && *audioman && (!cfg.output.isEmpty() || !cfg.input.isEmpty())) {
+            const audio_manager_device_t out = cfg.output.isEmpty() ? AUDIO_DEVICE_UNCHANGED
+                    : audio_manager_get_device_from_name(cfg.output.toLatin1().constData());
+            const audio_manager_device_t in = cfg.input.isEmpty() ? AUDIO_DEVICE_UNCHANGED
+                    : audio_manager_get_device_from_name(cfg.input.toLatin1().constData());
+            const int r2 = audio_manager_set_handle_type(*audioman, type, out, in);
+            if (r2 < 0) qWarning() << "[CALLAUDIO] set_handle_type" << cfg.output << cfg.input << "failed:" << r2;
         }
     }
     if (rc < 0) {

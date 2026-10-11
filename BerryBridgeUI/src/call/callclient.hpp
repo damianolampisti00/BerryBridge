@@ -22,6 +22,7 @@ class CallClient : public QObject
     Q_PROPERTY(QString reason READ reason NOTIFY changed)
     Q_PROPERTY(bool muted READ muted NOTIFY changed)
     Q_PROPERTY(bool speaker READ speaker NOTIFY changed)
+    Q_PROPERTY(QString route READ route NOTIFY changed)      // where the call audio goes
     Q_PROPERTY(bool connected READ connected NOTIFY changed) // the call has been answered (timer running)
     Q_PROPERTY(QString elapsed READ elapsed NOTIFY tick)     // "m:ss"
     Q_PROPERTY(QString link READ link NOTIFY changed)        // gateway link state, for Settings
@@ -34,6 +35,7 @@ public:
     QString reason() const { return m_status.value("reason").toString(); }
     bool muted() const { return m_status.value("muted").toBool(); }
     bool speaker() const { return m_status.value("speaker").toBool(); }
+    QString route() const { return m_status.value("route").toString(); }
     bool connected() const { return m_status.value("since").toLongLong() > 0; }
     QString elapsed() const;
     QString link() const { return m_status.value("link", "service not running").toString(); }

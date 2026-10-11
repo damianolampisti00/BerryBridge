@@ -83,6 +83,14 @@ Sheet {
                     textStyle.fontSize: FontSize.Large
                     textStyle.color: Color.create("#8696A0")
                 }
+                Label {
+                    // The service moves the call to a Bluetooth or wired headset by itself.
+                    text: callClient.route == "btsco" ? "Audio: Bluetooth"
+                          : (callClient.route == "headset" || callClient.route == "headphone") ? "Audio: cuffie" : ""
+                    visible: text.length > 0 && callClient.state == "active"
+                    horizontalAlignment: HorizontalAlignment.Center
+                    textStyle.color: Color.create("#53BDEB")
+                }
                 }
             }
 
