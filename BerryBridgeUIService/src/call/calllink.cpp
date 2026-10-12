@@ -6,9 +6,15 @@
 #include <QtEndian>
 
 #include <math.h>
+#include <string.h>
+
+#include <opus/opus.h>
 
 namespace {
 const int kHeader = 12;
+const uchar kKindPcm = 0x01;
+const uchar kKindOpus = 0x03;
+const int kOpusBitrate = 24000;
 const int kFrameMs = 20;          // uplink block: 20 ms (the server re-blocks to MLow's 60 ms)
 const qint64 kMaxBacklog = 32000; // ~1 s of audio waiting in the socket: drop instead of queueing more
 }
@@ -17,10 +23,17 @@ CallLink::CallLink(const QUrl &url, const QByteArray &token, bool verifyTls, boo
                    AudioRing *uplink, AudioRing *downlink, int rate, bool synthetic, QObject *parent) :
         QObject(parent),
         rttMinMs(1 << 30),
+        m_enc(0), m_dec(0), m_opus(false),
         m_url(url), m_token(token), m_verify(verifyTls), m_echo(echoTest), m_synthetic(synthetic),
         m_uplink(uplink), m_downlink(downlink), m_rate(rate),
         m_ws(0), m_pumpTimer(0), m_seq(0), m_lastRxSeq(0), m_syntheticSent(0), m_stopping(false)
 {
+}
+
+CallLink::~CallLink()
+{
+    if (m_enc) opus_encoder_destroy(m_enc);
+    if (m_dec) opus_decoder_destroy(m_dec);
 }
 
 void CallLink::start()
@@ -31,6 +44,18 @@ void CallLink::start()
     connect(m_ws, SIGNAL(closed(QString)), this, SLOT(onClosed(QString)));
     connect(m_ws, SIGNAL(textMessage(QByteArray)), this, SLOT(onText(QByteArray)));
     connect(m_ws, SIGNAL(binaryMessage(QByteArray)), this, SLOT(onBinary(QByteArray)));
+    // Opus at the call rate (16 kHz mono, VoIP, 20 ms packets); without it
+    // the link simply stays on PCM.
+    int err = 0;
+    m_enc = opus_encoder_create(m_rate, 1, OPUS_APPLICATION_VOIP, &err);
+    if (err != OPUS_OK) m_enc = 0;
+    if (m_enc) {
+        opus_encoder_ctl(m_enc, OPUS_SET_BITRATE(kOpusBitrate));
+        opus_encoder_ctl(m_enc, OPUS_SET_COMPLEXITY(5)); // the Q5's CPU, next to the audio threads
+        opus_encoder_ctl(m_enc, OPUS_SET_SIGNAL(OPUS_SIGNAL_VOICE));
+    }
+    m_dec = opus_decoder_create(m_rate, 1, &err);
+    if (err != OPUS_OK) m_dec = 0;
     m_pumpTimer = new QTimer(this);
     m_pumpTimer->setInterval(10);
     connect(m_pumpTimer, SIGNAL(timeout()), this, SLOT(pump()));
@@ -59,6 +84,13 @@ void CallLink::onOpened()
 {
     setState("open" + (m_ws->tlsReport().isEmpty() ? QString() : " (TLS: " + m_ws->tlsReport() + ")"));
     if (m_echo) m_ws->sendText("{\"type\":\"test.echo\",\"on\":true}");
+    // PCM until the gateway agrees (an older one just ignores the request).
+    m_opus = false;
+    if (m_enc && m_dec) {
+        opus_encoder_ctl(m_enc, OPUS_RESET_STATE);
+        opus_decoder_ctl(m_dec, OPUS_RESET_STATE);
+        m_ws->sendText("{\"type\":\"audio.codec\",\"codec\":\"opus\"}");
+    }
     m_syntheticSent = m_clock.elapsed() * m_rate / 1000; // tone starts now, no catch-up burst
     if (m_uplink) m_uplink->clear();                       // nor stale mic audio
     m_pumpTimer->start();
@@ -88,12 +120,17 @@ void CallLink::onClosed(const QString &reason)
 
 void CallLink::onText(const QByteArray &utf8)
 {
+    if (utf8.contains("\"audio.codec\"")) {
+        m_opus = m_enc && m_dec && utf8.contains("\"opus\"");
+        qDebug() << "[CALLLINK] audio codec:" << (m_opus ? "opus" : "pcm");
+    }
     emit textReceived(utf8);
 }
 
 void CallLink::onBinary(const QByteArray &data)
 {
-    if (data.size() < kHeader || uchar(data.at(0)) != 0x01) return;
+    const uchar kind = data.size() >= kHeader ? uchar(data.at(0)) : 0;
+    if (kind != kKindPcm && kind != kKindOpus) return;
     const uchar *h = reinterpret_cast<const uchar *>(data.constData());
     const quint32 seq = qFromLittleEndian<quint32>(h + 4);
     const quint32 ts = qFromLittleEndian<quint32>(h + 8);
@@ -110,7 +147,16 @@ void CallLink::onBinary(const QByteArray &data)
         if (rtt < int(rttMinMs)) rttMinMs = rtt;
         if (rtt > int(rttMaxMs)) rttMaxMs = rtt;
     }
-    if (m_downlink) m_downlink->write(data.constData() + kHeader, data.size() - kHeader);
+    if (!m_downlink) return;
+    if (kind == kKindOpus) {
+        if (!m_dec) return;
+        qint16 pcm[16000 * 120 / 1000 + 1]; // any Opus packet at up to 16 kHz
+        const int n = opus_decode(m_dec, reinterpret_cast<const unsigned char *>(data.constData() + kHeader),
+                                  data.size() - kHeader, pcm, 16000 * 120 / 1000, 0);
+        if (n > 0) m_downlink->write(reinterpret_cast<const char *>(pcm), n * 2);
+        return;
+    }
+    m_downlink->write(data.constData() + kHeader, data.size() - kHeader);
 }
 
 void CallLink::pump()
@@ -136,8 +182,16 @@ void CallLink::pump()
             m_syntheticSent += frameBytes / 2;
         }
         if (m_ws->bytesToWrite() > kMaxBacklog) continue; // network stalled: drop, don't pile up
+        if (m_opus) {
+            unsigned char packet[1275];
+            const int n = opus_encode(m_enc, reinterpret_cast<const qint16 *>(frame.constData() + kHeader),
+                                      frameBytes / 2, packet, sizeof packet);
+            if (n <= 0) continue;
+            frame.resize(kHeader + n);
+            memcpy(frame.data() + kHeader, packet, n);
+        }
         uchar *h = reinterpret_cast<uchar *>(frame.data());
-        h[0] = 0x01;
+        h[0] = m_opus ? kKindOpus : kKindPcm;
         qToLittleEndian<quint32>(++m_seq, h + 4);
         qToLittleEndian<quint32>(quint32(m_clock.elapsed()), h + 8);
         if (m_ws->sendBinary(frame)) framesSent.ref();
