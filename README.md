@@ -19,7 +19,7 @@ What it adds:
 
 ## 📞 WhatsApp calls (experimental)
 
-Berry Bridge can make and receive **WhatsApp voice calls** on the BlackBerry. Beeper doesn't carry calls, so they go through [WaCalls](https://github.com/JotaDev66/WaCalls), a server that implements WhatsApp's VoIP stack (signaling, MLow codec, SRTP relays) on top of whatsmeow, plus a small **Berry Bridge gateway** added to it in [damianolampisti00/WaCalls](https://github.com/damianolampisti00/WaCalls#berry-bridge-gateway-blackberry-10) (`cmd/server/bbgateway.go`). The phone stays a plain audio terminal: it only moves 16 kHz PCM and simple JSON commands over one TLS WebSocket.
+Berry Bridge can make and receive **WhatsApp voice calls** on the BlackBerry. Beeper doesn't carry calls, so they go through [WaCalls](https://github.com/JotaDev66/WaCalls), a server that implements WhatsApp's VoIP stack (signaling, MLow codec, SRTP relays) on top of whatsmeow, plus a small **Berry Bridge gateway** added to it in [damianolampisti00/WaCalls](https://github.com/damianolampisti00/WaCalls#berry-bridge-gateway-blackberry-10) (`cmd/server/bbgateway.go`). The phone stays a plain audio terminal: it only moves 16 kHz audio (Opus, about 24 kbit/s each way, or raw PCM with an older gateway) and simple JSON commands over one TLS WebSocket.
 
 ```
 WhatsApp <-> WaCalls (linked device of your account) <-> gateway (wss, token) <-> Berry Bridge service <-> mic / earpiece / speaker
