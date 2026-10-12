@@ -25,6 +25,10 @@
 #include <QDateTime>
 #include <QDebug>
 #include <QEvent>
+#include <QAbstractSocket>
+#include <QLocalSocket>
+
+#include "serviceguard.hpp"
 #include <exception>
 #include <QDir>
 #include <QFile>
@@ -57,20 +61,47 @@ using namespace bb;
 class ServiceApplication : public Application
 {
 public:
-    ServiceApplication(int &argc, char **argv) : Application(argc, argv) {}
+    ServiceApplication(int &argc, char **argv) : Application(argc, argv), m_reported(0) {}
     bool notify(QObject *receiver, QEvent *event)
     {
         try {
             return Application::notify(receiver, event);
         } catch (const std::exception &e) {
-            qWarning() << "[SERVICE] exception in an event handler:" << e.what() << "event" << int(event->type())
-                       << "receiver" << (receiver ? receiver->metaObject()->className() : "?");
+            recover(receiver, event, e.what());
         } catch (...) {
-            qWarning() << "[SERVICE] unknown exception in an event handler: event" << int(event->type())
-                       << "receiver" << (receiver ? receiver->metaObject()->className() : "?");
+            recover(receiver, event, "unknown exception");
         }
         return false;
     }
+
+private:
+    // A socket notifier that throws fires again at once (seen: bad_alloc
+    // ~100 times a second for an hour, the push link never came back): close
+    // that socket, its owner reconnects or drops it. Logged a few times only.
+    void recover(QObject *receiver, QEvent *event, const char *what)
+    {
+        QObject *socket = 0;
+        for (QObject *p = receiver; p && !socket; p = p->parent()) {
+            if (qobject_cast<QAbstractSocket *>(p) || qobject_cast<QLocalSocket *>(p)) socket = p;
+        }
+        if (m_reported < 20) {
+            ++m_reported;
+            QString where = receiver ? receiver->metaObject()->className() : "?";
+            if (QAbstractSocket *s = qobject_cast<QAbstractSocket *>(socket))
+                where += QString(" of %1 to %2:%3").arg(s->metaObject()->className()).arg(s->peerName()).arg(s->peerPort());
+            else if (QLocalSocket *s = qobject_cast<QLocalSocket *>(socket))
+                where += QString(" of a local socket (%1)").arg(s->serverName());
+            qWarning() << "[SERVICE] exception in an event handler:" << what << "event" << int(event->type()) << where
+                       << (socket ? "- closing that socket" : "");
+        }
+        if (socket) {
+            SocketCloser *closer = new SocketCloser(socket);
+            closer->moveToThread(socket->thread());
+            QMetaObject::invokeMethod(closer, "run", Qt::QueuedConnection);
+        }
+    }
+
+    int m_reported;
 };
 
 int main(int argc, char **argv)
