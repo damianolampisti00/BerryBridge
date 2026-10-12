@@ -14,37 +14,51 @@ disk and nothing is cached: once opened it is gone, as on the official app.
 
     GET /v1/pending                                   (metadata only, for checks)
 
+and sends them, as the Android app does (upload marked ephemeral, then a
+raven_attachment with view_mode "once"):
+
+    POST /v1/send_once?username=<the other person>   body: the photo (JPEG/PNG)
+
+into the one-to-one thread with that user (it must exist already).
+
 Setup: data/settings.json (instagrapi session, created by `login_from_feather`),
 data/token (generated on first start). Listens on 127.0.0.1:8103.
 """
 import glob
+import io
 import json
 import logging
 import os
+import random
 import secrets
 import threading
 import time
 import urllib.request
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 from instagrapi import Client
 from instagrapi.exceptions import ChallengeRequired, LoginRequired
+from PIL import Image, ImageOps
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(HERE, "data")
 SETTINGS = os.path.join(DATA, "settings.json")
+ACCOUNT = os.path.join(DATA, "account")   # the Instagram username this service is for
 ADDR = ("127.0.0.1", int(os.environ.get("IGVIEW_PORT", "8103")))
 MATCH_WINDOW_S = 300        # a notice and its Instagram item are a few seconds apart
 THREADS_TO_SCAN = 20
 MAX_MEDIA_BYTES = 40 << 20
 MAX_FAILURES = 10           # wrong tokens per address before a lockout
 LOCKOUT_S = 15 * 60
+MAX_UPLOAD_BYTES = 15 << 20
 
 log = logging.getLogger("igview")
 _lock = threading.Lock()    # one Instagram request at a time
 _client = None
 _failures = {}
+_threads = {}               # username -> Direct thread id
 
 
 def token():
@@ -87,6 +101,12 @@ def login_from_feather():
     c.set_locale("it_IT")
     c.set_timezone_offset(2 * 3600)
     c.login_by_sessionid(best[1])
+    # Feather may be signed in to another account by now: never switch.
+    who = c.account_info().username
+    if os.path.exists(ACCOUNT) and open(ACCOUNT).read().strip() != who:
+        raise RuntimeError(f"Feather is signed in to {who}, not to this service's account")
+    with open(ACCOUNT, "w") as f:
+        f.write(who + "\n")
     c.dump_settings(SETTINGS)
     os.chmod(SETTINGS, 0o600)
 
@@ -131,6 +151,74 @@ def mark_seen(thread_id, item_id):
                       data={"item_ids": f"[{item_id}]", "target_item_type": "raven_media",
                             "_uuid": c.uuid, "client_context": ctx, "offline_threading_id": ctx},
                       with_signature=False)
+
+
+def thread_with(username):
+    """The one-to-one Direct thread with this user (cached)."""
+    if username in _threads:
+        return _threads[username]
+    c = client()
+    uid = int(c.user_id_from_username(username))
+    t = c.direct_thread_by_participants([uid])
+    tid = t.get("thread_v2_id") or t.get("thread_id")
+    if not tid and isinstance(c.last_json, dict):
+        t = c.last_json.get("thread") or {}
+        tid = t.get("thread_v2_id") or t.get("thread_id")
+    if tid:
+        _threads[username] = str(tid)
+    return _threads.get(username)
+
+
+def as_jpeg(data):
+    """The photo as the app sends it: upright, at most 1080x1920, JPEG."""
+    img = ImageOps.exif_transpose(Image.open(io.BytesIO(data))).convert("RGB")
+    img.thumbnail((1080, 1920))
+    out = io.BytesIO()
+    img.save(out, "JPEG", quality=88)
+    return out.getvalue(), img.size
+
+
+def send_once(thread_id, jpeg, size):
+    """Upload marked ephemeral (0 once, 1 replayable, 2 permanent), then the
+    raven_attachment broadcast with view_mode "once"."""
+    import requests
+
+    c = client()
+    entity = f"fb_uploader_{int(time.time() * 1000)}"
+    headers = c._messenger_rupload_headers({"image_type": "FILE_ATTACHMENT",
+                                            "ephemeral_media_view_mode": "0", "ig_raven_metadata": "{}"})
+    headers.update({"content-type": "application/octet-stream", "offset": "0",
+                    "x-entity-length": str(len(jpeg)), "x-entity-name": entity, "x-entity-type": "image/jpeg"})
+    r = requests.post(f"https://rupload.facebook.com/messenger_image/{entity}", data=jpeg, headers=headers, timeout=120)
+    if r.status_code != 200:
+        raise RuntimeError(f"upload failed: HTTP {r.status_code}")
+    media_id = int(r.json()["media_id"])
+    w, h = size
+    token = c.generate_mutation_token()
+    data = {
+        "recipient_users": "[]", "view_mode": "once", "has_camera_metadata": "1", "camera_entry_point": "3",
+        "thread_ids": json.dumps([str(thread_id)]), "reshare_mode": "allow_reshare",
+        "original_media_type": "1", "send_attribution": "direct_composer", "client_context": token,
+        "camera_session_id": str(uuid.uuid4()), "attachment_fbid": str(media_id),
+        "include_e2ee_mentioned_user_list": "1", "hide_from_profile_grid": "false", "timezone_offset": "0",
+        "client_shared_at": str(int(time.time())), "configure_mode": "2", "source_type": "4",
+        "camera_position": "back", "_uid": str(c.user_id), "device_id": c.android_device_id,
+        "composition_id": str(uuid.uuid4()), "mutation_token": token, "_uuid": c.uuid,
+        "creation_surface": "camera", "has_ig_camera_edits": "false", "capture_type": "normal",
+        "audience": "default", "upload_id": str(random.randint(10**11, 10**12 - 1)),
+        "client_timestamp": str(int(time.time())),
+        "media_transformation_info": json.dumps({"width": str(w), "height": str(h), "x_transform": "0",
+                                                 "y_transform": "0", "zoom": "1.0", "rotation": "0.0",
+                                                 "background_coverage": "0.0"}),
+        "edits": {"filter_type": 0, "filter_strength": 1.0},
+        "extra": {"source_width": w, "source_height": h},
+        "device": {"manufacturer": "Google", "model": "sdk_gphone_arm64", "android_version": 30,
+                   "android_release": "11"},
+    }
+    res = c.private_request("direct_v2/threads/broadcast/raven_attachment/",
+                            data=c.with_default_data(data), with_signature=True)
+    if res.get("status") != "ok":
+        raise RuntimeError(f"broadcast: {res.get('status')}")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -200,14 +288,46 @@ class Handler(BaseHTTPRequestHandler):
                     return
             return self.reply(404, {"error": "unknown path"})
         except (ChallengeRequired, LoginRequired) as e:
-            global _client
-            _client = None
-            log.warning("Instagram wants a check: %s", type(e).__name__)
-            return self.reply(503, {"error": "instagram_check",
-                                    "message": "Instagram chiede una verifica: apri instagram.com in Feather e conferma"})
+            return self.instagram_check(e)
         except Exception as e:
             log.exception("request failed")
             return self.reply(500, {"error": type(e).__name__})
+
+    def do_POST(self):
+        u = urlparse(self.path)
+        if not self.authorized():
+            return
+        if u.path != "/v1/send_once":
+            return self.reply(404, {"error": "unknown path"})
+        username = parse_qs(u.query).get("username", [""])[0].strip().lstrip("@")
+        size = int(self.headers.get("Content-Length") or 0)
+        if not username or size <= 0 or size > MAX_UPLOAD_BYTES:
+            return self.reply(400, {"error": "username and a photo (up to 15 MB) are needed"})
+        body = self.rfile.read(size)
+        try:
+            jpeg, dims = as_jpeg(body)
+        except Exception:
+            return self.reply(400, {"error": "not a photo"})
+        try:
+            with _lock:
+                tid = thread_with(username)
+                if not tid:
+                    return self.reply(404, {"error": "no_thread", "message": "Nessuna chat con questo utente"})
+                send_once(tid, jpeg, dims)
+            log.info("sent a view-once photo")
+            return self.reply(200, {"ok": True})
+        except (ChallengeRequired, LoginRequired) as e:
+            return self.instagram_check(e)
+        except Exception as e:
+            log.exception("send failed")
+            return self.reply(500, {"error": type(e).__name__})
+
+    def instagram_check(self, e):
+        global _client
+        _client = None
+        log.warning("Instagram wants a check: %s", type(e).__name__)
+        return self.reply(503, {"error": "instagram_check",
+                                "message": "Instagram chiede una verifica: apri instagram.com in Feather e conferma"})
 
 
 if __name__ == "__main__":
@@ -217,5 +337,8 @@ if __name__ == "__main__":
     TOKEN = token()
     if not os.path.exists(SETTINGS):
         login_from_feather()
+    if not os.path.exists(ACCOUNT):
+        with open(ACCOUNT, "w") as f:
+            f.write(client().account_info().username + "\n")
     log.info("igview listening on %s:%d", *ADDR)
     ThreadingHTTPServer(ADDR, Handler).serve_forever()

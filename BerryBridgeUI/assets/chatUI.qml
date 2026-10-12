@@ -1,6 +1,7 @@
 import bb.cascades 1.4
 import bb.system 1.2
 import bb.device 1.4
+import bb.cascades.pickers 1.0
 
 Page {
     id: chatPage
@@ -514,12 +515,19 @@ Page {
         if (chatTitleBar.acceptAction) return;
         if (chatPage.chatType == "single" && callClient.isWhatsAppAccount(chatPage.accountID)) {
             chatTitleBar.acceptAction = callAction;
+        } else if (viewOnce.configured && viewOnce.instagramPeer(chatPage.accountID, chatPage.chatID).length > 0) {
+            // Instagram one-to-one chats: a photo to be viewed once.
+            chatTitleBar.acceptAction = viewOnceSendAction;
         }
     }
     
     onCreationCompleted: {
         viewOnce.imageReady.connect(function () { viewOnceSheet.open() });
         viewOnce.videoReady.connect(function (path) { dat.openMedia(path) });
+        viewOnce.sent.connect(function () {
+            voiceToast.body = "Foto a visualizzazione singola inviata";
+            voiceToast.show();
+        });
         viewOnce.failed.connect(function (message) {
             voiceToast.body = message;
             voiceToast.show();
@@ -764,7 +772,8 @@ Page {
                                             ActionItem {
                                                 title: "Apri (visualizzazione singola)"
                                                 imageSource: "asset:///images/ic_view_image.png"
-                                                enabled: ListItemData.type === "NOTICE" && rootMessageItem.listView.viewOnceClient.isViewOnceNotice(ListItemData.text)
+                                                // not on our own: Instagram never shows a view-once to its sender
+                                                enabled: ListItemData.type === "NOTICE" && ! ListItemData.isSender && rootMessageItem.listView.viewOnceClient.isViewOnceNotice(ListItemData.text)
                                                 onTriggered: {
                                                     rootMessageItem.listView.viewOnceClient.open(ListItemData.rawTimestamp ? ListItemData.rawTimestamp : new Date().toISOString())
                                                 }
@@ -2075,7 +2084,7 @@ Label {
         // Opening a view-once photo/video (viewOnce.busy): it can take a few
         // seconds, the server fetches it from Instagram first.
         Container {
-            visible: viewOnce.busy
+            visible: viewOnce.busy || viewOnce.sending
             horizontalAlignment: HorizontalAlignment.Center
             verticalAlignment: VerticalAlignment.Center
             background: Color.create("#E0202020")
@@ -2087,14 +2096,14 @@ Label {
                 orientation: LayoutOrientation.LeftToRight
             }
             ActivityIndicator {
-                running: viewOnce.busy
+                running: viewOnce.busy || viewOnce.sending
                 preferredWidth: 80
                 preferredHeight: 80
                 verticalAlignment: VerticalAlignment.Center
             }
             Label {
                 leftMargin: 24
-                text: "Apro la visualizzazione singola..."
+                text: viewOnce.sending ? "Invio la foto a visualizzazione singola..." : "Apro la visualizzazione singola..."
                 verticalAlignment: VerticalAlignment.Center
                 textStyle.color: Color.White
             }
@@ -2131,6 +2140,22 @@ Label {
                         verticalAlignment: VerticalAlignment.Fill
                     }
                 }
+            }
+        },
+        ActionItem {
+            id: viewOnceSendAction
+            title: "Foto 1x"
+            imageSource: "asset:///images/ic_view_image.png"
+            onTriggered: viewOncePicker.open()
+        },
+        FilePicker {
+            id: viewOncePicker
+            type: FileType.Picture
+            mode: FilePickerMode.Picker
+            title: "Foto a visualizzazione singola"
+            onFileSelected: {
+                if (selectedFiles.length == 0) return;
+                viewOnce.sendPhoto(viewOnce.instagramPeer(chatPage.accountID, chatPage.chatID), selectedFiles[0]);
             }
         },
         ActionItem {

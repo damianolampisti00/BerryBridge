@@ -15,6 +15,7 @@
 #include <bb/ImageData>
 #include <bb/cascades/Image>
 #include <bb/data/JsonDataAccess>
+#include <bb/data/SqlDataAccess>
 #include <bb/utility/ImageConverter>
 
 namespace {
@@ -23,7 +24,7 @@ const int kVideoLifetimeMs = 60 * 1000;
 }
 
 ViewOnceClient::ViewOnceClient(QObject *parent) :
-        QObject(parent), m_nam(new QNetworkAccessManager(this)), m_reply(0), m_busy(false)
+        QObject(parent), m_nam(new QNetworkAccessManager(this)), m_reply(0), m_sendReply(0), m_busy(false)
 {
     // A video left behind by a crash or a kill: never keep one.
     QDir tmp(QDir::tempPath());
@@ -42,6 +43,75 @@ bool ViewOnceClient::isViewOnceNotice(const QString &text)
 {
     // mautrix-instagram: "This %s can only be %s once. Use the Instagram app to view."
     return QRegExp("can only be \\w+ once\\. Use the Instagram app").indexIn(text) >= 0;
+}
+
+QString ViewOnceClient::instagramPeer(const QString &accountID, const QString &chatID) const
+{
+    if (!accountID.startsWith("instagram")) return QString();
+    bb::data::SqlDataAccess sda("/accounts/1000/shared/misc/BerryBridge/chats.db");
+    QVariantMap params;
+    params["id"] = chatID;
+    const QVariantList rows = sda.execute("SELECT type, participants_json FROM chats WHERE id = :id LIMIT 1",
+                                          params).toList();
+    if (rows.isEmpty() || rows.first().toMap().value("type").toString() != "single") return QString();
+    QString json = rows.first().toMap().value("participants_json").toString();
+    if (json.startsWith("[]") || json.startsWith("{}")) json = json.mid(2); // an old upstream bug's prefix
+    bb::data::JsonDataAccess jda;
+    const QVariant parsed = jda.loadFromBuffer(json);
+    QVariantList items = parsed.toMap().value("items").toList();
+    if (items.isEmpty()) items = parsed.toList();
+    foreach (const QVariant &v, items) {
+        const QVariantMap p = v.toMap();
+        if (!p.value("isSelf").toBool() && !p.value("username").toString().isEmpty())
+            return p.value("username").toString();
+    }
+    return QString();
+}
+
+void ViewOnceClient::sendPhoto(const QString &username, const QString &filePath)
+{
+    if (m_sendReply || username.isEmpty()) return;
+    QSettings s;
+    const QString base = s.value("viewOnceUrl").toString().trimmed();
+    const QString token = s.value("viewOnceToken").toString().trimmed();
+    if (base.isEmpty() || token.isEmpty()) {
+        emit failed(tr("Server per le foto a visualizzazione singola non configurato"));
+        return;
+    }
+    QString path = filePath;
+    if (path.startsWith("file://")) path = QUrl(path).toLocalFile();
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly) || f.size() > 15 * 1024 * 1024) {
+        emit failed(tr("Foto non leggibile o troppo grande"));
+        return;
+    }
+    QUrl url(base + "/v1/send_once");
+    url.addQueryItem("username", username);
+    QNetworkRequest req(url);
+    req.setRawHeader("Authorization", "Bearer " + token.toUtf8());
+    req.setHeader(QNetworkRequest::ContentTypeHeader, "application/octet-stream");
+    m_sendReply = m_nam->post(req, f.readAll());
+    connect(m_sendReply, SIGNAL(finished()), this, SLOT(onSendFinished()));
+    emit sendingChanged();
+}
+
+void ViewOnceClient::onSendFinished()
+{
+    QNetworkReply *reply = m_sendReply;
+    m_sendReply = 0;
+    emit sendingChanged();
+    reply->deleteLater();
+    const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    if (status == 200) {
+        emit sent();
+        return;
+    }
+    bb::data::JsonDataAccess jda;
+    const QVariantMap err = jda.loadFromBuffer(reply->readAll()).toMap();
+    if (status == 404) emit failed(tr("Nessuna chat Instagram con questa persona"));
+    else if (err.value("error").toString() == "instagram_check") emit failed(err.value("message").toString());
+    else if (status == 0) emit failed(tr("Server non raggiungibile"));
+    else emit failed(tr("Invio non riuscito (%1)").arg(status));
 }
 
 void ViewOnceClient::open(const QString &utcTimestamp)

@@ -19,6 +19,9 @@ class QNetworkReply;
 // clear(); a video needs a file for the player, which is deleted a minute
 // after the player opened it (and any leftover at the next start).
 //
+// sendPhoto() sends a photo as view-once into a one-to-one Instagram chat
+// (the service finds the thread from the other person's username).
+//
 // Settings (Berry Bridge's QSettings): viewOnceUrl (e.g.
 // https://igview.example.com), viewOnceToken.
 class ViewOnceClient : public QObject
@@ -27,6 +30,7 @@ class ViewOnceClient : public QObject
     Q_PROPERTY(QVariant image READ image NOTIFY imageChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
     Q_PROPERTY(bool configured READ configured CONSTANT)
+    Q_PROPERTY(bool sending READ sending NOTIFY sendingChanged)
 
 public:
     explicit ViewOnceClient(QObject *parent = 0);
@@ -34,6 +38,7 @@ public:
     QVariant image() const { return m_image; }
     bool busy() const { return m_busy; }
     bool configured() const;
+    bool sending() const { return m_sendReply != 0; }
 
     // True for the bridge's notice that stands in for a view-once media.
     Q_INVOKABLE static bool isViewOnceNotice(const QString &text);
@@ -41,6 +46,10 @@ public:
     Q_INVOKABLE void open(const QString &utcTimestamp);
     // Drops the photo from memory (the viewer closed).
     Q_INVOKABLE void clear();
+    // The other person's Instagram username in a one-to-one Instagram chat
+    // (empty otherwise): sending is offered only there.
+    Q_INVOKABLE QString instagramPeer(const QString &accountID, const QString &chatID) const;
+    Q_INVOKABLE void sendPhoto(const QString &username, const QString &filePath);
 
 signals:
     void imageChanged();
@@ -48,16 +57,20 @@ signals:
     void imageReady();
     void videoReady(const QString &path);
     void failed(const QString &message);
+    void sendingChanged();
+    void sent();
 
 private slots:
     void onFinished();
     void deleteOldVideos();
+    void onSendFinished();
 
 private:
     void setBusy(bool b);
 
     QNetworkAccessManager *m_nam;
     QNetworkReply *m_reply;
+    QNetworkReply *m_sendReply;
     QVariant m_image;
     bool m_busy;
     QStringList m_videos;
