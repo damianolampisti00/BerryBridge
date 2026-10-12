@@ -7,6 +7,9 @@
 #include <QUrl>
 #include <QtConcurrentRun>
 
+#include <errno.h>
+#include <audio/audio_manager_routing.h>
+
 using bb::multimedia::MediaPlayer;
 using bb::multimedia::MediaState;
 using bb::multimedia::MediaError;
@@ -14,12 +17,20 @@ using bb::multimedia::MediaError;
 VoicePlayer::VoicePlayer(QObject *parent) :
         QObject(parent),
         m_player(new MediaPlayer(this)),
+        m_audioman(0),
         m_playing(false),
         m_preparing(false),
         m_position(0),
         m_duration(0)
 {
     m_player->setStatusInterval(250); // smooth enough for the bubble's progress bar
+    // Play as media, like the Music app: a MediaPlayer's own handle has the
+    // "default" type, which doesn't bring up the Bluetooth A2DP link -- with
+    // headphones connected but idle the voice notes came out of the speaker.
+    if (audio_manager_get_handle(AUDIO_TYPE_MULTIMEDIA, 0, true, &m_audioman) == EOK)
+        m_player->setAudioManagerHandle(m_audioman);
+    else
+        m_audioman = 0;
     connect(m_player, SIGNAL(mediaStateChanged(bb::multimedia::MediaState::Type)),
             this, SLOT(onMediaStateChanged(bb::multimedia::MediaState::Type)));
     connect(m_player, SIGNAL(positionChanged(unsigned int)), this, SLOT(onPositionChanged(unsigned int)));
@@ -28,6 +39,12 @@ VoicePlayer::VoicePlayer(QObject *parent) :
     connect(m_player, SIGNAL(error(bb::multimedia::MediaError::Type, unsigned int)),
             this, SLOT(onError(bb::multimedia::MediaError::Type, unsigned int)));
     connect(&m_prepareWatcher, SIGNAL(finished()), this, SLOT(onPrepared()));
+}
+
+VoicePlayer::~VoicePlayer()
+{
+    m_player->stop();
+    if (m_audioman) audio_manager_free_handle(m_audioman);
 }
 
 void VoicePlayer::toggle(const QString &messageId, const QString &localPath)
