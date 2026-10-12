@@ -23,15 +23,18 @@
 
 #ifdef BB_FILE_LOG
 #include <QDateTime>
+#include <QDir>
 #include <QFile>
 #include <QTextStream>
 #include <stdio.h>
 
-// Developer builds only (package.ps1 -DevTools): debug output also goes to a file in the shared Berry Bridge folder (slog2
+// Developer builds only (package.ps1 -DevTools): debug output also goes to a file in the app's data folder (slog2
 // doesn't keep this process's lines): service_debug.log there, trimmed at 512 KB.
 static void fileMessageHandler(QtMsgType type, const char *msg)
 {
-    static const char *const kPath = "/accounts/1000/shared/misc/BerryBridge/service_debug.log";
+    // In the app's private data folder: in the shared one every line made the
+    // media indexer (mmsynclite) re-index the file -- battery, in standby too.
+    static const QString kPath = QDir::homePath() + "/service_debug.log";
     QFile f(kPath);
     if (f.size() > 512 * 1024) f.remove();
     if (f.open(QIODevice::Append | QIODevice::Text)) {
