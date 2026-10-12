@@ -38,7 +38,7 @@ Setup:
 
 Not done yet: echo cancellation on the speakerphone (use the earpiece, or a headset), video calls, group calls.
 
-For development, `package.ps1 -DevTools` adds a call-audio test harness and debug logs in the shared folder. Never use it for builds you give to others: those files are reachable by other apps.
+For development, `package.ps1 -DevTools` adds a call-audio test harness (driven by a file in the shared folder) and debug logs in the app's data folder. Never use it for builds you give to others: the shared folder is reachable by other apps.
 
 Credits: Berry Bridge by Adem Zengin (MIT, see `LICENSE`); the Ogg/Opus encoder and decoder come from BBport; libopus is BSD-licensed (`third_party/opus/COPYING`); calls rely on WaCalls by JotaDev66 (MIT) and whatsmeow.
 
