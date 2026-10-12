@@ -243,6 +243,10 @@ void CallService::onClientData()
 {
     QLocalSocket *s = qobject_cast<QLocalSocket *>(sender());
     if (!s) return;
+    if (!s->canReadLine() && s->bytesAvailable() > 64 * 1024) { // no command is that long
+        s->abort();
+        return;
+    }
     while (s->canReadLine()) {
         bb::data::JsonDataAccess jda;
         const QVariantMap cmd = jda.loadFromBuffer(s->readLine().trimmed()).toMap();
