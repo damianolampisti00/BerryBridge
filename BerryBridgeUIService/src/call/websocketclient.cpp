@@ -12,8 +12,8 @@
 
 namespace {
 const char *const kGuid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
-const int kKeepAliveMs = 15000;   // ping this often...
-const int kSilenceMs = 40000;     // ...and give up after this long without any data
+const int kKeepAliveMs = 45000;   // ping this often (Cloudflare drops idle links after 100 s)...
+const int kSilenceMs = 110000;    // ...and give up after this long without any data
 const int kMaxMessage = 1 << 20;  // a call gateway never sends anything near this
 
 QByteArray randomBytes(int n)
