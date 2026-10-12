@@ -11,10 +11,15 @@
 
 class QTimer;
 class WebSocketClient;
+struct OpusEncoder;
+struct OpusDecoder;
 
 // The audio plane of a call between this phone and the gateway
-// (WaCalls' bbgateway.go): microphone PCM out, peer PCM in, as binary
-// WebSocket frames of [0x01, flags, 0, 0, seq u32 LE, ms u32 LE, PCM...].
+// (WaCalls' bbgateway.go): microphone out, peer audio in, as binary
+// WebSocket frames of [kind, flags, 0, 0, seq u32 LE, ms u32 LE, payload]:
+// kind 0x01 PCM, or 0x03 one 20 ms Opus packet once the gateway agreed to
+// "audio.codec": "opus" (~24 kbit/s a way instead of 256: over a weak Wi-Fi,
+// shared with a Bluetooth headset, the raw PCM stalled).
 // Lives on its own network thread (see CallAudioTest), so neither the
 // audio threads nor the service's main thread (Beeper sync, SQLite) can
 // delay it, and it can't delay them: the two sides only meet in AudioRings.
@@ -27,6 +32,7 @@ public:
     // echoTest: ask the gateway to send our audio straight back (TEST 2).
     CallLink(const QUrl &url, const QByteArray &token, bool verifyTls, bool echoTest,
              AudioRing *uplink, AudioRing *downlink, int rate, bool synthetic = false, QObject *parent = 0);
+    ~CallLink();
 
     // Stats (read from the controller's thread).
     QAtomicInt framesSent, framesReceived, lost, reordered, rttSumMs, rttCount, rttMinMs, rttMaxMs, backlogBytes;
@@ -56,6 +62,9 @@ private slots:
 private:
     void setState(const QString &s) { QMutexLocker l(&m_stateMutex); m_state = s; }
 
+    OpusEncoder *m_enc;
+    OpusDecoder *m_dec;
+    bool m_opus; // the gateway agreed: Opus both ways on this connection
     QUrl m_url;
     QByteArray m_token;
     bool m_verify;
