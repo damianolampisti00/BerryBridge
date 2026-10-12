@@ -25,6 +25,7 @@ class VoicePlayer : public QObject
     Q_PROPERTY(int duration READ duration NOTIFY progressChanged)    // ms, 0 until known
 public:
     explicit VoicePlayer(QObject *parent = 0);
+    ~VoicePlayer();
 
     QString activeId() const { return m_activeId; }
     bool playing() const { return m_playing; }
@@ -55,6 +56,7 @@ private:
     void reset();
 
     bb::multimedia::MediaPlayer *m_player;
+    unsigned int m_audioman; // multimedia audio manager handle, see the constructor
     QFutureWatcher<QString> m_prepareWatcher;
     QString m_activeId;
     QString m_preparingId;
