@@ -239,7 +239,7 @@ void Service::startSyncLoop()
     connect(m_syncTimer, SIGNAL(timeout()), this, SLOT(performPeriodicSync()));
 
     performPeriodicSync();
-    m_syncTimer->start(60000);
+    m_syncTimer->start(300000); // the push link brings messages at once; this only catches up
 }
 
 void Service::performPeriodicSync()
@@ -307,7 +307,7 @@ void Service::onSyncResponseReceived()
         reply->readAll();
         if (m_syncReply == reply) m_syncReply = 0;
         reply->deleteLater();
-        if (m_syncTimer) m_syncTimer->start(60000);
+        if (m_syncTimer) m_syncTimer->start(300000);
         return;
     }
 
@@ -316,7 +316,7 @@ void Service::onSyncResponseReceived()
     if (reply->error() != QNetworkReply::NoError || httpStatus >= 400) {
         qWarning() << "[DATABASE] Sync Failed! HTTP:" << httpStatus;
         m_nextCursor = "";
-        if (m_syncTimer) m_syncTimer->start(60000);
+        if (m_syncTimer) m_syncTimer->start(300000);
         if (m_syncReply == reply) m_syncReply = 0;
         reply->deleteLater();
         return;
@@ -360,7 +360,7 @@ void Service::onSyncResponseReceived()
 
         if (!msgDb.isOpen() || !chatDb.isOpen()) {
             qCritical() << "[DATABASE] Kritik Hata: Veritabanları açılamadı!";
-            if (m_syncTimer) m_syncTimer->start(60000);
+            if (m_syncTimer) m_syncTimer->start(300000);
             if (m_syncReply == reply) m_syncReply = 0;
             reply->deleteLater();
             return;
@@ -990,20 +990,30 @@ void Service::startPushConnection()
         return;
     }
 
-    if (m_pushSocket->state() != QAbstractSocket::UnconnectedState) {
-        m_pushSocket->abort();
+    // A retry (timer, network change) while the push link is up and working:
+    // nothing to do. Reconnecting anyway used to start an endless loop (see
+    // below) -- a full TLS handshake every 5 s, the radio never idle.
+    if (m_pushSocket->state() == QAbstractSocket::ConnectedState && m_pushHandshakeDone) {
+        qDebug() << "[service.cpp] [PUSH] already connected.";
+        return;
     }
 
-    m_pushHandshakeDone = false;
-    m_wsBuffer.clear();
-
     // Önceki dinleyicileri temizleyerek sinyal çakışmasını önlüyoruz
+    // (before the abort: its disconnected() would schedule another
+    // startPushConnection(), which aborts the new link, and so on).
     disconnect(m_pushSocket, SIGNAL(encrypted()), this, SLOT(onPushConnected()));
     disconnect(m_pushSocket, SIGNAL(connected()), this, SLOT(onPushConnected()));
     disconnect(m_pushSocket, SIGNAL(disconnected()), this, SLOT(onPushDisconnected()));
     disconnect(m_pushSocket, SIGNAL(readyRead()), this, SLOT(onPushReadyRead()));
     disconnect(m_pushSocket, SIGNAL(error(QAbstractSocket::SocketError)), this, SLOT(onPushError(QAbstractSocket::SocketError)));
     disconnect(m_pushSocket, SIGNAL(sslErrors(QList<QSslError>)), m_pushSocket, SLOT(ignoreSslErrors()));
+
+    if (m_pushSocket->state() != QAbstractSocket::UnconnectedState) {
+        m_pushSocket->abort();
+    }
+
+    m_pushHandshakeDone = false;
+    m_wsBuffer.clear();
 
     // Ortak sinyaller
     connect(m_pushSocket, SIGNAL(disconnected()), this, SLOT(onPushDisconnected()), Qt::UniqueConnection);
@@ -1068,8 +1078,10 @@ void Service::onPushConnected()
     m_pushSocket->write(request.toUtf8());
     m_pushSocket->flush();
 
-    m_pushPingTimer->start(20000);
-    m_pushWatchdogTimer->start(45000);
+    // Battery: every wake-up keeps the radio on for seconds. Cloudflare drops
+    // idle WebSockets after 100 s, so a ping every 50 s is enough.
+    m_pushPingTimer->start(50000);
+    m_pushWatchdogTimer->start(130000);
 }
 
 void Service::onPushDisconnected()
@@ -1085,7 +1097,7 @@ void Service::onPushReadyRead()
 {
     try {
         // Reset watchdog on any data receive
-        m_pushWatchdogTimer->start(45000);
+        m_pushWatchdogTimer->start(130000);
 
         m_wsBuffer.append(m_pushSocket->readAll());
 
@@ -1602,7 +1614,7 @@ void Service::onPushPingTimeout()
 
 void Service::onPushWatchdogTimeout()
 {
-    qDebug() << "[service.cpp] [PUSH] Watchdog timeout after 45s of silence! Connection silently died. Reconnecting...";
+    qDebug() << "[service.cpp] [PUSH] Watchdog timeout after 130s of silence! Connection silently died. Reconnecting...";
     m_pushSocket->abort();  // abort() avoids TIME_WAIT overhead and cleans socket state instantly, triggering disconnected()
 }
 
