@@ -23,6 +23,9 @@
 
 #ifdef BB_FILE_LOG
 #include <QDateTime>
+#include <QDebug>
+#include <QEvent>
+#include <exception>
 #include <QDir>
 #include <QFile>
 #include <QTextStream>
@@ -47,12 +50,35 @@ static void fileMessageHandler(QtMsgType type, const char *msg)
 
 using namespace bb;
 
+// An exception out of an event handler (Qt 4 throws std::bad_alloc, for one)
+// used to abort the whole service -- calls and notifications gone until the
+// app was opened again. It is logged with what was being delivered, and the
+// service goes on.
+class ServiceApplication : public Application
+{
+public:
+    ServiceApplication(int &argc, char **argv) : Application(argc, argv) {}
+    bool notify(QObject *receiver, QEvent *event)
+    {
+        try {
+            return Application::notify(receiver, event);
+        } catch (const std::exception &e) {
+            qWarning() << "[SERVICE] exception in an event handler:" << e.what() << "event" << int(event->type())
+                       << "receiver" << (receiver ? receiver->metaObject()->className() : "?");
+        } catch (...) {
+            qWarning() << "[SERVICE] unknown exception in an event handler: event" << int(event->type())
+                       << "receiver" << (receiver ? receiver->metaObject()->className() : "?");
+        }
+        return false;
+    }
+};
+
 int main(int argc, char **argv)
 {
 #ifdef BB_FILE_LOG
     qInstallMsgHandler(fileMessageHandler);
 #endif
-    Application app(argc, argv);
+    ServiceApplication app(argc, argv);
 
     // Create the Application UI object, this is where the main.qml file
     // is loaded and the application scene is set.

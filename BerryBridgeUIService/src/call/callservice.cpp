@@ -47,6 +47,9 @@ CallService::CallService(QObject *parent) :
 {
     qRegisterMetaType<AudioRing *>("AudioRing*");
     connect(m_ringer, SIGNAL(chosen(QString)), this, SLOT(onRingerChosen(QString)));
+    // Leftovers of a previous run (a crash mid-call): no call yet.
+    QFile::remove(QDir::homePath() + "/call_ringing");
+    QFile::remove(QDir::homePath() + "/call_active");
 
     // Call audio: WaCalls' format (16 kHz mono S16), the voice path of the
     // audio manager (routed and prioritised like a phone call).
@@ -346,6 +349,14 @@ void CallService::setState(State s, const QString &reason)
         if (flag.open(QIODevice::WriteOnly)) flag.close();
     } else {
         flag.remove();
+    }
+    // A call going on: package.ps1 -Install won't update the app (that stops
+    // this service, and the call with it).
+    QFile busy(QDir::homePath() + "/call_active");
+    if (s == Incoming || s == Outgoing || s == Active) {
+        if (busy.open(QIODevice::WriteOnly)) busy.close();
+    } else {
+        busy.remove();
     }
     // A call in progress keeps a quiet Hub notification, like the phone's:
     // tapping it brings back the call screen.

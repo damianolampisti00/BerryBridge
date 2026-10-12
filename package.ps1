@@ -108,6 +108,11 @@ SSH=(ssh -i "$keyPosix" -o HostKeyAlgorithms=ssh-rsa -o PubkeyAcceptedAlgorithms
 echo "Copying $barName and installbar.sh to the phone ($PhoneIp)..."
 `"`${SSH[@]}`" "cat > /accounts/1000/shared/downloads/$barName" < "$barPosix"
 `"`${SSH[@]}`" "cat > /accounts/1000/shared/downloads/installbar.sh" < "$installerPosix"
+# Not during a call: the update stops the app's service, and the call with it.
+if `"`${SSH[@]}`" "ls /accounts/1000/appdata/it.berrybridge.app.*/data/call_active" >/dev/null 2>&1; then
+  echo "A call is going on: not installing now (retry when it has ended)." >&2
+  exit 3
+fi
 echo "Installing..."
 `"`${SSH[@]}`" "cat /accounts/1000/shared/downloads/installbar.sh | sh -s -- $barName"
 "@
