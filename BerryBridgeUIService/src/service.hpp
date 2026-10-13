@@ -110,6 +110,7 @@ private:
     void handlePushEvent(const QByteArray &payload);
     // Direct WebSocket State
     bool m_pushHandshakeDone;
+    int m_pushRefused; // handshakes in a row the server answered with an error
     bool m_initRun;
     QString m_url;
     QByteArray m_wsBuffer;
