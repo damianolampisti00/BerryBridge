@@ -515,9 +515,6 @@ Page {
         if (chatTitleBar.acceptAction) return;
         if (chatPage.chatType == "single" && callClient.isWhatsAppAccount(chatPage.accountID)) {
             chatTitleBar.acceptAction = callAction;
-        } else if (viewOnce.configured && viewOnce.instagramPeer(chatPage.accountID, chatPage.chatID).length > 0) {
-            // Instagram one-to-one chats: a photo to be viewed once.
-            chatTitleBar.acceptAction = viewOnceSendAction;
         }
     }
     
@@ -2140,22 +2137,6 @@ Label {
                         verticalAlignment: VerticalAlignment.Fill
                     }
                 }
-            }
-        },
-        ActionItem {
-            id: viewOnceSendAction
-            title: "Foto 1x"
-            imageSource: "asset:///images/ic_view_image.png"
-            onTriggered: viewOncePicker.open()
-        },
-        FilePicker {
-            id: viewOncePicker
-            type: FileType.Picture
-            mode: FilePickerMode.Picker
-            title: "Foto a visualizzazione singola"
-            onFileSelected: {
-                if (selectedFiles.length == 0) return;
-                viewOnce.sendPhoto(viewOnce.instagramPeer(chatPage.accountID, chatPage.chatID), selectedFiles[0]);
             }
         },
         ActionItem {
