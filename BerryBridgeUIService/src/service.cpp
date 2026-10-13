@@ -1087,7 +1087,6 @@ void Service::onPushConnected()
 
 void Service::onPushDisconnected()
 {
-    qDebug() << "[service.cpp] [PUSH] Disconnected from WhatsApp API. Reconnecting in 5s...";
     //sendStatusNotification("Push Connection", "Disconnected from Server. Reconnecting...");
     m_pushPingTimer->stop();
     m_pushWatchdogTimer->stop();
@@ -1096,6 +1095,7 @@ void Service::onPushDisconnected()
     // every 5 s. A network change still reconnects at once.
     int delay = 5000;
     if (m_pushRefused > 0) delay = qMin(5000 << qMin(m_pushRefused, 5), 120000);
+    qDebug() << "[service.cpp] [PUSH] Disconnected from WhatsApp API. Reconnecting in" << delay / 1000 << "s...";
     QTimer::singleShot(delay, this, SLOT(startPushConnection()));
 }
 
