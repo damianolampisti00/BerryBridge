@@ -2,6 +2,7 @@
 #define CALLSERVICE_HPP_
 
 #include <QElapsedTimer>
+#include <QHash>
 #include <QList>
 #include <QObject>
 #include <QSettings>
@@ -59,6 +60,7 @@ private slots:
     void bringUpCallScreen();
     void checkRoute();
     void finishEnded();
+    void logStats();
 
 private:
     enum State { Idle, Incoming, Outgoing, Active, Ended };
@@ -75,6 +77,8 @@ private:
                              bool quiet = false);
     QString nameForPhone(const QString &phone) const;
     void stopLink();
+    void collectStats(bool print);
+    qint64 statDelta(const char *key, qint64 now);
 
     QSettings m_settings;
     QThread *m_netThread;
@@ -105,6 +109,8 @@ private:
     CallRinger *m_ringer;
     bool m_ongoing;
     QTimer *m_routeTimer;
+    QTimer *m_statsTimer;
+    QHash<QByteArray, qint64> m_statsLast; // counters at the previous stats line
 };
 
 #endif /* CALLSERVICE_HPP_ */
