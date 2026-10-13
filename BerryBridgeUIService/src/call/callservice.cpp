@@ -43,7 +43,8 @@ CallService::CallService(QObject *parent) :
         m_upRing(0), m_downRing(0), m_input(0), m_output(0),
         m_ringer(new CallRinger(this)),
         m_ongoing(false),
-        m_routeTimer(new QTimer(this))
+        m_routeTimer(new QTimer(this)),
+        m_statsTimer(new QTimer(this))
 {
     qRegisterMetaType<AudioRing *>("AudioRing*");
     connect(m_ringer, SIGNAL(chosen(QString)), this, SLOT(onRingerChosen(QString)));
@@ -63,6 +64,8 @@ CallService::CallService(QObject *parent) :
     // moves the call there, as on the phone app.
     m_routeTimer->setInterval(1000);
     connect(m_routeTimer, SIGNAL(timeout()), this, SLOT(checkRoute()));
+    m_statsTimer->setInterval(10000);
+    connect(m_statsTimer, SIGNAL(timeout()), this, SLOT(logStats()));
 
     const QString path = socketPath();
     QLocalServer::removeServer(path);
@@ -439,12 +442,17 @@ void CallService::startAudio()
     m_output->start(QThread::TimeCriticalPriority);
     if (m_link) QMetaObject::invokeMethod(m_link, "setAudio", Qt::QueuedConnection,
                                           Q_ARG(AudioRing*, m_upRing), Q_ARG(AudioRing*, m_downRing));
+    m_statsLast.clear();
+    collectStats(false); // the link's counters run across calls: start from here
+    m_statsTimer->start();
 }
 
 void CallService::stopAudio()
 {
     m_routeTimer->stop();
     if (!m_input && !m_output) return;
+    m_statsTimer->stop();
+    collectStats(true); // the call's last seconds
     // Detach from the network thread FIRST (blocking), so it never touches
     // the rings after they are freed.
     if (m_link) QMetaObject::invokeMethod(m_link, "setAudio", Qt::BlockingQueuedConnection,
@@ -454,6 +462,50 @@ void CallService::stopAudio()
     delete m_upRing;
     delete m_downRing;
     m_upRing = m_downRing = 0;
+}
+
+// Every 10 s of a call, what the audio path did meanwhile, to tell the
+// causes of crackles apart: frames lost or late on the network (rtt, the
+// sender's backlog), playback with nothing to play (concealed blocks of
+// silence, device underruns), audio thrown away to bound the latency
+// (drop) or because a buffer was full (overflow), mic overruns.
+void CallService::logStats()
+{
+    collectStats(true);
+}
+
+void CallService::collectStats(bool print)
+{
+    QString line;
+    if (m_link) {
+        const qint64 n = statDelta("rttN", m_link->rttCount);
+        const qint64 sum = statDelta("rttSum", m_link->rttSumMs);
+        line += QString(" net recv %1 sent %2 lost %3 reord %4 rtt %5ms backlog %6B")
+                .arg(statDelta("recv", m_link->framesReceived)).arg(statDelta("sent", m_link->framesSent))
+                .arg(statDelta("lost", m_link->lost)).arg(statDelta("reord", m_link->reordered))
+                .arg(n > 0 ? sum / n : -1).arg(int(m_link->backlogBytes));
+    }
+    if (m_output && m_downRing) {
+        line += QString(" | play conceal %1 undr %2 drop %3 buffered %4ms overflow %5B")
+                .arg(statDelta("conceal", m_output->concealed)).arg(statDelta("undr", m_output->underruns))
+                .arg(statDelta("drop", m_output->dropped))
+                .arg(m_downRing->level() * 1000 / qMax(1, m_audioCfg.rate * 2))
+                .arg(statDelta("downOverflow", m_downRing->overflowBytes()));
+    }
+    if (m_input && m_upRing) {
+        line += QString(" | mic ovr %1 overflow %2B")
+                .arg(statDelta("ovr", m_input->overruns)).arg(statDelta("upOverflow", m_upRing->overflowBytes()));
+    }
+    if (print && !line.isEmpty()) qDebug() << ("[CALL] stats" + line);
+}
+
+// How much a counter grew since the last stats line. Counters of a reopened
+// device (route change) start again from 0: count from there.
+qint64 CallService::statDelta(const char *key, qint64 now)
+{
+    const qint64 last = m_statsLast.value(key, 0);
+    m_statsLast.insert(key, now);
+    return now >= last ? now - last : now;
 }
 
 void CallService::restartOutput()
