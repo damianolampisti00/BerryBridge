@@ -7,6 +7,14 @@ Page {
     property string chatID
     property string selItem
     property Page chatPageRef
+
+    // Instagram one-to-one chats also get a photo to be viewed once (igview).
+    // The chat's ids are set right after the page is created, chatID last.
+    onChatIDChanged: {
+        if (viewOnce.configured && viewOnce.instagramPeer(accountID, chatID).length > 0) {
+            attachmentModel.insert(1, { "title": "Foto a visualizzazione singola", "icon": "asset:///images/ic_view_image.png", "type": "VIEWONCE", "color": Color.create("#C13584") });
+        }
+    }
     
     titleBar: TitleBar {
         title: "Attach"
@@ -89,7 +97,7 @@ Page {
                 mapPage.chatID = attachmentPage.chatID;
                 navigationPane.push(mapPage);
                 }
-                else if (selItem === "IMAGE") {
+                else if (selItem === "IMAGE" || selItem === "VIEWONCE") {
                     galleryPicker.type=FileType.Picture
                     galleryPicker.open();
                 }
@@ -138,6 +146,12 @@ Page {
                 var selectedFilePath = selectedFiles[0];
                 var formattedSize = app.getFileSizeFormatted(selectedFilePath);
                 var fullFilePath = "file://" + selectedFilePath;         
+                if (selItem == "VIEWONCE") {
+                    // Sent straight away; the chat page shows "sending" / "sent".
+                    viewOnce.sendPhoto(viewOnce.instagramPeer(attachmentPage.accountID, attachmentPage.chatID), selectedFilePath);
+                    navigationPane.pop();
+                    return;
+                }
                 // Önizleme sayfamızı oluşturuyoruz
                 if (selItem=="IMAGE"){
                     var previewPage = previewPageDefinition.createObject();
