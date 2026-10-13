@@ -58,7 +58,8 @@ Service::Service() :
         m_lastSyncTimestamp("1970-01-01T00:00:00Z"),
         m_pushSocket(new QSslSocket(this)),
         m_pushPingTimer(new QTimer(this)),
-        m_pushWatchdogTimer(new QTimer(this))
+        m_pushWatchdogTimer(new QTimer(this)),
+        m_pushRefused(0)
 {
     // --- GLOBAL SSL/TLS KONFİGÜRASYONU ---
     // (QNetworkAccessManager üzerinden yapılacak REST API istekleri için varsayılan ayar)
@@ -1090,7 +1091,12 @@ void Service::onPushDisconnected()
     //sendStatusNotification("Push Connection", "Disconnected from Server. Reconnecting...");
     m_pushPingTimer->stop();
     m_pushWatchdogTimer->stop();
-    QTimer::singleShot(5000, this, SLOT(startPushConnection()));
+    // While the server keeps refusing (Beeper Desktop down: the tunnel answers
+    // 502 for hours), back off up to 2 minutes instead of a TLS handshake
+    // every 5 s. A network change still reconnects at once.
+    int delay = 5000;
+    if (m_pushRefused > 0) delay = qMin(5000 << qMin(m_pushRefused, 5), 120000);
+    QTimer::singleShot(delay, this, SLOT(startPushConnection()));
 }
 
 void Service::onPushReadyRead()
@@ -1107,6 +1113,19 @@ void Service::onPushReadyRead()
         if (!m_pushHandshakeDone) {
             int idx = m_wsBuffer.indexOf("\r\n\r\n");
             if (idx != -1) {
+                // Only "101 Switching Protocols" opens the WebSocket; anything
+                // else (502 from the tunnel, 401 for a bad token) comes with
+                // an HTML/text body that is not made of frames.
+                QByteArray status = m_wsBuffer.left(m_wsBuffer.indexOf("\r\n"));
+                if (status.split(' ').value(1) != "101") {
+                    ++m_pushRefused;
+                    qWarning() << "[service.cpp] [PUSH] server refused the WebSocket:" << status
+                               << "- attempt" << m_pushRefused;
+                    m_wsBuffer.clear();
+                    m_pushSocket->abort(); // -> onPushDisconnected(), which backs off
+                    return;
+                }
+                m_pushRefused = 0;
                 m_pushHandshakeDone = true;
                 m_wsBuffer.remove(0, idx + 4);
                 qDebug() << "[service.cpp] [PUSH] WebSocket Handshake complete!";
