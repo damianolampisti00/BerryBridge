@@ -486,11 +486,12 @@ void CallService::collectStats(bool print)
                 .arg(n > 0 ? sum / n : -1).arg(int(m_link->backlogBytes));
     }
     if (m_output && m_downRing) {
-        line += QString(" | play conceal %1 undr %2 drop %3 buffered %4ms overflow %5B")
+        line += QString(" | play conceal %1 rebuf %7 undr %2 drop %3 buffered %4ms overflow %5B")
                 .arg(statDelta("conceal", m_output->concealed)).arg(statDelta("undr", m_output->underruns))
                 .arg(statDelta("drop", m_output->dropped))
                 .arg(m_downRing->level() * 1000 / qMax(1, m_audioCfg.rate * 2))
-                .arg(statDelta("downOverflow", m_downRing->overflowBytes()));
+                .arg(statDelta("downOverflow", m_downRing->overflowBytes()))
+                .arg(statDelta("rebuf", m_output->rebuffers));
     }
     if (m_input && m_upRing) {
         line += QString(" | mic ovr %1 overflow %2B")

@@ -75,6 +75,7 @@ public:
     QAtomicInt underruns;     // device ran dry (it stopped)
     QAtomicInt concealed;     // blocks of silence written because no audio had arrived
     QAtomicInt dropped;       // blocks discarded to keep the latency bounded
+    QAtomicInt rebuffers;     // times playback ran dry and waited for the jitter buffer again
     QAtomicInt actualRate;
     QAtomicInt actualFrag;
     QAtomicInt actualFrags;

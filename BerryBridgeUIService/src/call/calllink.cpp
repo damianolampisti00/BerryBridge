@@ -91,6 +91,7 @@ void CallLink::onOpened()
         opus_decoder_ctl(m_dec, OPUS_RESET_STATE);
         m_ws->sendText("{\"type\":\"audio.codec\",\"codec\":\"opus\"}");
     }
+    m_lastRxSeq = 0; // the gateway numbers each connection from 1
     m_syntheticSent = m_clock.elapsed() * m_rate / 1000; // tone starts now, no catch-up burst
     if (m_uplink) m_uplink->clear();                       // nor stale mic audio
     m_pumpTimer->start();
@@ -192,6 +193,13 @@ void CallLink::pump()
         }
         uchar *h = reinterpret_cast<uchar *>(frame.data());
         h[0] = m_opus ? kKindOpus : kKindPcm;
+        if (m_downlink) {
+            // Flag 0x01: [2:4] = downlink samples played so far (mod 65536),
+            // when this block was captured. The gateway lines up what it sent
+            // with what the mic heard, to cancel the speaker's echo.
+            h[1] = 0x01;
+            qToLittleEndian<quint16>(quint16(m_downlink->taken() / 2), h + 2);
+        }
         qToLittleEndian<quint32>(++m_seq, h + 4);
         qToLittleEndian<quint32>(quint32(m_clock.elapsed()), h + 8);
         if (m_ws->sendBinary(frame)) framesSent.ref();
