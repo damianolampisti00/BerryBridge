@@ -14,7 +14,7 @@ class AudioRing
 {
 public:
     explicit AudioRing(int capacityBytes) :
-            m_buf(capacityBytes, 0), m_head(0), m_size(0), m_overflow(0) {}
+            m_buf(capacityBytes, 0), m_head(0), m_size(0), m_overflow(0), m_taken(0) {}
 
     void write(const char *data, int n)
     {
@@ -30,6 +30,7 @@ public:
             m_head = (m_head + excess) % cap;
             m_size -= excess;
             m_overflow += excess;
+            m_taken += excess;
         }
         int tail = (m_head + m_size) % cap;
         for (int done = 0; done < n;) {
@@ -56,6 +57,7 @@ public:
         n = qMin(n, m_size);
         m_head = (m_head + n) % m_buf.size();
         m_size -= n;
+        m_taken += n;
         return n;
     }
 
@@ -70,7 +72,12 @@ public:
 
     int level() const { QMutexLocker lock(&m_mutex); return m_size; }
     qint64 overflowBytes() const { QMutexLocker lock(&m_mutex); return m_overflow; }
-    void clear() { QMutexLocker lock(&m_mutex); m_head = m_size = 0; }
+    // Bytes that have left the ring (read, skipped, dropped, cleared): the
+    // position in the written stream the reader has reached. For the
+    // downlink, what the phone has played so far -- the gateway's echo
+    // canceller lines up its reference with it.
+    qint64 taken() const { QMutexLocker lock(&m_mutex); return m_taken; }
+    void clear() { QMutexLocker lock(&m_mutex); m_taken += m_size; m_head = m_size = 0; }
     void wakeReaders() { QMutexLocker lock(&m_mutex); m_cond.wakeAll(); }
 
 private:
@@ -85,6 +92,7 @@ private:
             m_head = (m_head + chunk) % cap;
         }
         m_size -= n;
+        m_taken += n;
         return n;
     }
 
@@ -94,6 +102,7 @@ private:
     int m_head;
     int m_size;
     qint64 m_overflow;
+    qint64 m_taken;
 };
 
 #endif /* AUDIORING_HPP_ */

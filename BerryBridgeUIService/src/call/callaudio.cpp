@@ -200,24 +200,30 @@ void CallAudioOutput::run()
 
     while (!m_stop) {
         if (m_source) {
+            // (Re)building the jitter buffer: silence until it holds
+            // jitterBytes, the device keeps running (no underrun click).
+            // After a pause of the peer (no packets are sent in silence) or
+            // a late packet, playing on with an empty buffer would turn every
+            // bit of network jitter into a gap in the speech: the crackles.
+            if (prebuffering && m_source->level() >= jitterBytes) prebuffering = false;
             if (prebuffering) {
-                // Build up the jitter buffer before (re)starting playback.
-                if (!m_source->waitFor(jitterBytes, 50)) continue;
-                prebuffering = false;
-            }
-            // Latency bound: more than the jitter target + 3 blocks queued
-            // means the other side runs fast or arrived in a burst.
-            while (m_source->level() > jitterBytes + 3 * frag) {
-                m_source->skip(frag);
-                dropped.ref();
-            }
-            if (m_source->waitFor(frag, fragMs)) {
-                m_source->read(buffer.data(), frag);
+                memset(buffer.data(), 0, frag); // the blocking write below paces the loop
             } else {
-                const int got = m_source->read(buffer.data(), frag); // partial block, if any
-                memset(buffer.data() + got, 0, frag - got);
-                concealed.ref();
-                if (m_source->level() == 0 && concealed % 25 == 0) prebuffering = true; // long gap: re-buffer
+                // Latency bound: more than the jitter target + 3 blocks queued
+                // means the other side runs fast or arrived in a burst.
+                while (m_source->level() > jitterBytes + 3 * frag) {
+                    m_source->skip(frag);
+                    dropped.ref();
+                }
+                if (m_source->waitFor(frag, fragMs)) {
+                    m_source->read(buffer.data(), frag);
+                } else {
+                    const int got = m_source->read(buffer.data(), frag); // partial block, if any
+                    memset(buffer.data() + got, 0, frag - got);
+                    concealed.ref();
+                    prebuffering = true; // ran dry: wait for the cushion again
+                    rebuffers.ref();
+                }
             }
         } else {
             // Echo probe: 1 s of white noise at -12 dBFS, 1 s of silence.
