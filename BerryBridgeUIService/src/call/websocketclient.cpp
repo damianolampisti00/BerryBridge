@@ -9,6 +9,7 @@
 #include <QtEndian>
 
 #include <resolv.h>
+#include "../freshresolver.hpp"
 
 namespace {
 const char *const kGuid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
@@ -39,6 +40,9 @@ QByteArray headerValue(const QByteArray &head, const QByteArray &name)
 WebSocketClient::WebSocketClient(QObject *parent) :
         QObject(parent),
         m_socket(0),
+        m_lookup(0),
+        m_secure(true),
+        m_port(443),
         m_state(Idle),
         m_verify(true),
         m_fragmentOpcode(0)
@@ -80,6 +84,8 @@ void WebSocketClient::open(const QUrl &url, const Headers &headers, bool verifyP
 
     const bool secure = url.scheme().compare("wss", Qt::CaseInsensitive) == 0;
     const int port = url.port(secure ? 443 : 80);
+    m_secure = secure;
+    m_port = quint16(port);
     if (secure) {
         QSslConfiguration cfg = m_socket->sslConfiguration();
         cfg.setProtocol(QSsl::SecureProtocols);
@@ -87,11 +93,26 @@ void WebSocketClient::open(const QUrl &url, const Headers &headers, bool verifyP
         m_socket->setSslConfiguration(cfg);
         connect(m_socket, SIGNAL(encrypted()), this, SLOT(onConnected()));
         connect(m_socket, SIGNAL(sslErrors(QList<QSslError>)), this, SLOT(onSslErrors(QList<QSslError>)));
-        m_socket->connectToHostEncrypted(url.host(), quint16(port));
     } else {
         connect(m_socket, SIGNAL(connected()), this, SLOT(onConnected()));
-        m_socket->connectToHost(url.host(), quint16(port));
     }
+    // Resolved in a fresh thread (freshresolver.hpp); a newer open() makes
+    // this lookup's result stale.
+    FreshResolver *resolver = new FreshResolver(url.host());
+    resolver->setProperty("lookup", ++m_lookup);
+    connect(resolver, SIGNAL(resolved(QString,QHostAddress)), this, SLOT(onResolved(QString,QHostAddress)));
+    resolver->start();
+}
+
+void WebSocketClient::onResolved(const QString &host, const QHostAddress &address)
+{
+    if (!sender() || sender()->property("lookup").toInt() != m_lookup || !m_socket || m_state != Connecting) return;
+    if (address.isNull()) {
+        finish("Host not found");
+        return;
+    }
+    if (m_secure) m_socket->connectToHostEncrypted(address.toString(), m_port, host); // the name for TLS
+    else m_socket->connectToHost(address, m_port);
 }
 
 void WebSocketClient::onSslErrors(const QList<QSslError> &errors)

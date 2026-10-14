@@ -21,6 +21,7 @@
 #include <QNetworkAccessManager>
 #include <QtNetwork/QNetworkReply>
 #include <QtNetwork/QSslSocket>
+#include <QtNetwork/QHostAddress>
 #include <QTimer>
 #include <QNetworkConfigurationManager>
 #include <QStringList>
@@ -74,6 +75,7 @@ private slots:
     void onPushDisconnected();
     void onPushReadyRead();
     void onPushError(QAbstractSocket::SocketError socketError);
+    void onPushResolved(const QString &host, const QHostAddress &address);
     void onPushPingTimeout();
     void onPushWatchdogTimeout();
     void onStatusUpdateTimeout();
@@ -111,6 +113,9 @@ private:
     // Direct WebSocket State
     bool m_pushHandshakeDone;
     int m_pushRefused; // handshakes in a row the server answered with an error
+    bool m_pushResolving; // a FreshResolver lookup is under way
+    bool m_pushEncrypted;
+    quint16 m_pushPort;
     bool m_initRun;
     QString m_url;
     QByteArray m_wsBuffer;

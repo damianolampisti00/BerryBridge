@@ -10,6 +10,7 @@
 #include <QTimer>
 #include <QUrl>
 #include <QtNetwork/QAbstractSocket>
+#include <QtNetwork/QHostAddress>
 
 class QSslSocket;
 
@@ -58,6 +59,7 @@ private slots:
     void onSocketError(QAbstractSocket::SocketError error);
     void onSslErrors(const QList<QSslError> &errors);
     void onKeepAlive();
+    void onResolved(const QString &host, const QHostAddress &address);
 
 private:
     enum State { Idle, Connecting, Handshaking, Open, Closing };
@@ -66,6 +68,9 @@ private:
     void finish(const QString &reason);
 
     QSslSocket *m_socket;
+    int m_lookup; // which open() the pending lookup is for
+    bool m_secure;
+    quint16 m_port;
     State m_state;
     QUrl m_url;
     Headers m_headers;

@@ -41,6 +41,7 @@ static QString stateSettingsPath()
 #include <sys/time.h>
 #include <time.h>
 #include <resolv.h>
+#include "freshresolver.hpp"
 
 #include <QTimer>
 
@@ -59,7 +60,10 @@ Service::Service() :
         m_pushSocket(new QSslSocket(this)),
         m_pushPingTimer(new QTimer(this)),
         m_pushWatchdogTimer(new QTimer(this)),
-        m_pushRefused(0)
+        m_pushRefused(0),
+        m_pushResolving(false),
+        m_pushEncrypted(true),
+        m_pushPort(443)
 {
     // --- GLOBAL SSL/TLS KONFİGÜRASYONU ---
     // (QNetworkAccessManager üzerinden yapılacak REST API istekleri için varsayılan ayar)
@@ -998,6 +1002,7 @@ void Service::startPushConnection()
         qDebug() << "[service.cpp] [PUSH] already connected.";
         return;
     }
+    if (m_pushResolving) return; // a lookup is under way; it connects when done
 
     // Önceki dinleyicileri temizleyerek sinyal çakışmasını önlüyoruz
     // (before the abort: its disconnected() would schedule another
@@ -1033,15 +1038,21 @@ void Service::startPushConnection()
         connect(m_pushSocket, SIGNAL(sslErrors(QList<QSslError>)), m_pushSocket, SLOT(ignoreSslErrors()), Qt::UniqueConnection);
 
         qDebug() << "[PUSH] Guvenli TLS SSL baglantisi kuruluyor..." << host << ":" << port;
-        m_pushSocket->connectToHostEncrypted(host, port);
     } else {
         // --- Düz HTTP / Şifresiz TCP Bağlantısı ---
         // Normal TCP soketi bağlandığında doğrudan onPushConnected çağrılır
         connect(m_pushSocket, SIGNAL(connected()), this, SLOT(onPushConnected()), Qt::UniqueConnection);
 
         qDebug() << "[PUSH] Duz (HTTP) soket baglantisi kuruluyor..." << host << ":" << port;
-        m_pushSocket->connectToHost(host, port);
     }
+    // The name is resolved in a fresh thread (freshresolver.hpp), the
+    // connection then goes to the address with the name for TLS.
+    m_pushEncrypted = isEncrypted;
+    m_pushPort = port;
+    m_pushResolving = true;
+    FreshResolver *resolver = new FreshResolver(host);
+    connect(resolver, SIGNAL(resolved(QString,QHostAddress)), this, SLOT(onPushResolved(QString,QHostAddress)));
+    resolver->start();
 
     // Zamanlayıcılar
     connect(m_pushPingTimer, SIGNAL(timeout()), this, SLOT(onPushPingTimeout()), Qt::UniqueConnection);
@@ -1083,6 +1094,18 @@ void Service::onPushConnected()
     // idle WebSockets after 100 s, so a ping every 50 s is enough.
     m_pushPingTimer->start(50000);
     m_pushWatchdogTimer->start(130000);
+}
+
+void Service::onPushResolved(const QString &host, const QHostAddress &address)
+{
+    m_pushResolving = false;
+    if (address.isNull()) {
+        qDebug() << "[service.cpp] [PUSH] DNS lookup failed for" << host << "- retry in 10s...";
+        QTimer::singleShot(10000, this, SLOT(startPushConnection()));
+        return;
+    }
+    if (m_pushEncrypted) m_pushSocket->connectToHostEncrypted(address.toString(), m_pushPort, host);
+    else m_pushSocket->connectToHost(address, m_pushPort);
 }
 
 void Service::onPushDisconnected()
