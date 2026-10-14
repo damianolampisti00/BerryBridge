@@ -58,6 +58,7 @@ private slots:
     void onBinary(const QByteArray &data);
     void pump();
     void reconnect();
+    void updatePump();
 
 private:
     void setState(const QString &s) { QMutexLocker l(&m_stateMutex); m_state = s; }
