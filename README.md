@@ -8,9 +8,9 @@ This is a fork of [adem-zengin/BerryBridge](https://github.com/adem-zengin/Berry
 
 What it adds:
 
-- **Notifications with Instant Preview**, and tapping a notification opens that chat (the original's notification invoke target pointed to a non-existent app).
+- **Notifications with Instant Preview**, and tapping one opens that chat (the original does this too since 1.2.3). Here it also works for chats further down than the part of the list loaded so far (they are looked up in the database), switches to the account's tab without rebuilding the tabs, leaves an already open chat alone, and waits until the app is ready when the tap starts it.
 - **Profile pictures** for direct and group chats, fetched through Beeper Desktop's `/v1/assets/serve` and cached as small thumbnails. This also fixes the stored participant list of direct chats, which was unreadable (`JsonDataAccess::saveToBuffer` appends to the string it is given).
-- **Dark theme** (WhatsApp-like palette), selectable in **Settings > Dark theme** and applied right away; the light theme keeps the original colors.
+- **Dark theme**: the original has a dark mode too since 1.2.3; this one predates it and works differently. It switches right away without restarting the app (**Settings > Dark theme**, on by default), and all pages (chats, chat list, contacts, emoji, search, Active Frame) take their colors from one WhatsApp-like palette. The light theme keeps the original colors.
 - **Voice messages without BerryCore**: received voice notes play inside the chat (Ogg/Opus decoded on the phone), and you can record and send your own (with an empty text field the send button becomes a microphone). Recording uses the phone's voice-recording audio path with the driver's mmap mode off, which removes the crackling it otherwise produces.
 - **WhatsApp voice calls** (experimental, see [below](#-whatsapp-calls-experimental)): incoming and outgoing 1:1 calls with a call screen, through a WaCalls server.
 - **Active Frame**: the minimized app shows each account with its unread messages (archived chats left out, muted ones counted and said).
@@ -28,7 +28,7 @@ WhatsApp <-> WaCalls (linked device of your account) <-> gateway (wss, token) <-
 - **Incoming calls**: like a phone call, the screen turns on and a system dialog with *Rispondi* / *Rifiuta* shows up, also on the lock screen (the password prompt appears with it if the phone is locked with one). Sound and vibration follow the active profile and Berry Bridge's notification settings (Settings > Notifications). The call screen comes to the front, plus a Hub notification (and a missed-call one if you don't answer). The call also rings on your main phone, as on any linked device.
 - **Outgoing calls**: *Chiama* in the title bar of WhatsApp one-to-one chats (the number comes from Beeper's participant list).
 - **In a call**: timer, mute, speaker/earpiece, hang up. The call lives in the headless service, so hiding the screen or closing the app doesn't end it. A quiet "Chiamata WhatsApp in corso" notification in the Hub brings the call screen back.
-- **Audio**: 16 kHz mono PCM both ways, 20 ms blocks up, a jitter buffer down, the system's voice audio path; the gateway levels the peer's voice. About 10% CPU on a Q10. The certificate of the gateway is verified.
+- **Audio**: 16 kHz mono, 20 ms blocks, the system's voice audio path. Playback goes through a 120 ms jitter buffer that refills after every pause (no packets come while the peer is silent), so network jitter doesn't chop the speech. Each mic block carries the phone's playback position, so the gateway can cancel the phone's own earpiece/speaker echo; it also cancels the user's voice coming back from a hands-free peer, and levels both voices. About 10% CPU on a Q10. The certificate of the gateway is verified.
 
 Setup:
 
@@ -36,7 +36,7 @@ Setup:
 2. Expose only the gateway, over HTTPS (for example a Cloudflare tunnel to `localhost:8098`; HTTP/2 transport is the safer choice for a long-lived audio stream).
 3. In Berry Bridge **Settings**: *Calls server* `wss://your-host/ws` and *Calls token*. The status line below them shows the link state.
 
-Not done yet: echo cancellation on the speakerphone (use the earpiece, or a headset), video calls, group calls.
+Not done yet: video calls, group calls.
 
 For development, `package.ps1 -DevTools` adds a call-audio test harness (driven by a file in the shared folder) and debug logs in the app's data folder. Never use it for builds you give to others: the shared folder is reachable by other apps.
 
