@@ -94,7 +94,7 @@ void CallLink::onOpened()
     m_lastRxSeq = 0; // the gateway numbers each connection from 1
     m_syntheticSent = m_clock.elapsed() * m_rate / 1000; // tone starts now, no catch-up burst
     if (m_uplink) m_uplink->clear();                       // nor stale mic audio
-    m_pumpTimer->start();
+    updatePump();
     emit linkOpened();
 }
 
@@ -108,6 +108,20 @@ void CallLink::setAudio(AudioRing *uplink, AudioRing *downlink)
     m_uplink = uplink;
     m_downlink = downlink;
     if (m_uplink) m_uplink->clear();
+    updatePump();
+}
+
+// The 10 ms pump only runs while there is audio to send (a call, or the
+// test's synthetic tone). It used to run whenever the gateway link was open,
+// that is all day: the phone was woken ~25 times a second, the biggest single
+// cause of its standby drain (standbymon: 1000-1500 wakeups a minute on this
+// thread, with no call).
+void CallLink::updatePump()
+{
+    if (!m_pumpTimer) return;
+    const bool needed = m_ws && m_ws->isOpen() && (m_uplink || m_synthetic);
+    if (needed && !m_pumpTimer->isActive()) m_pumpTimer->start();
+    else if (!needed && m_pumpTimer->isActive()) m_pumpTimer->stop();
 }
 
 void CallLink::onClosed(const QString &reason)
