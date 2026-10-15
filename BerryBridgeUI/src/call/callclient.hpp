@@ -60,6 +60,7 @@ signals:
     void callScreenNeeded();
 
 private slots:
+    void updateTicker();
     void connectToService();
     void onReadyRead();
     void onDisconnected();
