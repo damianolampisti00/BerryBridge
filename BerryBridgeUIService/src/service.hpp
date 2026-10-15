@@ -80,6 +80,7 @@ private slots:
     void onPushSslErrors(const QList<QSslError> &errors);
     void onPushPingTimeout();
     void onPushWatchdogTimeout();
+    void onPushConnectDeadline();
     void onStatusUpdateTimeout();
     void onGlobalSslErrors(QNetworkReply *reply, const QList<QSslError> &errors);
 
@@ -118,6 +119,11 @@ private:
     int m_pushRefused; // handshakes in a row the server answered with an error
     class CallService *m_calls; // pinged together with the push link
     bool m_pushResolving; // a FreshResolver lookup is under way
+    // Lookup + TCP + TLS + upgrade must be done within this; a lookup that
+    // never returned kept the link down for 37 min (2026-10-15 19:54). Runs
+    // only while connecting, so it adds no wake-ups to a working link.
+    QTimer *m_pushConnectTimer;
+    int m_pushAttempt; // the current attempt; a late resolver answer is dropped
     bool m_pushEncrypted;
     quint16 m_pushPort;
     bool m_initRun;
