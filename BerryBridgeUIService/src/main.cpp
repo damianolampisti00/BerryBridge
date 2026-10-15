@@ -56,6 +56,7 @@ static void fileMessageHandler(QtMsgType type, const char *msg)
 using namespace bb;
 
 volatile int g_memoryTrouble = 0;
+MemoryGuard *g_memoryGuard = 0;
 
 // An exception out of an event handler (Qt 4 throws std::bad_alloc, for one)
 // used to abort the whole service -- calls and notifications gone until the
@@ -83,7 +84,10 @@ private:
     // that socket, its owner reconnects or drops it. Logged a few times only.
     void recover(QObject *receiver, QEvent *event, const char *what)
     {
-        if (strstr(what, "bad_alloc") || strstr(what, "bad allocation")) g_memoryTrouble = 1;
+        if (strstr(what, "bad_alloc") || strstr(what, "bad allocation")) {
+            g_memoryTrouble = 1;
+            if (g_memoryGuard) QTimer::singleShot(0, g_memoryGuard, SLOT(check()));
+        }
         QObject *socket = 0;
         for (QObject *p = receiver; p && !socket; p = p->parent()) {
             if (qobject_cast<QAbstractSocket *>(p) || qobject_cast<QLocalSocket *>(p)) socket = p;

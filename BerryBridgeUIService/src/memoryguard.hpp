@@ -18,6 +18,11 @@
 // Set wherever a std::bad_alloc is caught; MemoryGuard acts on it.
 extern volatile int g_memoryTrouble;
 
+class MemoryGuard;
+// The one guard (main.cpp); the service calls check() on wake-ups it has
+// anyway, so the guard adds none of its own.
+extern MemoryGuard *g_memoryGuard;
+
 // The navigator caps a headless service's data at ~2.9 MB (RLIMIT_DATA)
 // while it runs in the background partition, and lifts the cap while the
 // app's UI is in front (the service is moved into the UI's partition). A call
@@ -31,7 +36,10 @@ extern volatile int g_memoryTrouble;
 // fresh start.
 //
 // MemoryGuard: at start, raises the soft limit to the hard one where it can,
-// and every 30 s compares what counts against the limit with the limit. Close
+// and compares what counts against the limit with the limit whenever the
+// service is awake anyway: the push link's 50 s ping, every (re)connection
+// attempt, and right after a bad_alloc (a timer of its own would add wake-ups
+// in standby). Close
 // to it (or after a bad_alloc), outside a call, the service re-executes
 // itself: same pid (the navigator keeps tracking it), a fresh small heap,
 // everything reconnects as at a normal start. Not more than once in 10 minutes.
@@ -43,8 +51,7 @@ public:
             QObject(parent), m_argv(argv), m_waitingForCall(false)
     {
         raiseLimit();
-        connect(&m_timer, SIGNAL(timeout()), this, SLOT(check()));
-        m_timer.start(30000);
+        g_memoryGuard = this;
         QTimer::singleShot(10000, this, SLOT(report()));
     }
 
@@ -76,7 +83,7 @@ public:
         return *used >= 0 && *limit > 0;
     }
 
-private slots:
+public slots:
     void report()
     {
         qint64 anon, limit;
@@ -135,7 +142,6 @@ private:
     }
 
     char **m_argv;
-    QTimer m_timer;
     bool m_waitingForCall;
 };
 
