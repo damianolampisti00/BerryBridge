@@ -64,6 +64,7 @@ Service::Service() :
         m_pushPingTimer(new QTimer(this)),
         m_pushWatchdogTimer(new QTimer(this)),
         m_pushRefused(0),
+        m_calls(0),
         m_pushResolving(false),
         m_pushEncrypted(true),
         m_pushPort(443)
@@ -113,6 +114,7 @@ Service::Service() :
 
     // WhatsApp calls: the call service (gateway link, ringing, audio, UI socket).
     CallService *calls = new CallService(this);
+    m_calls = calls;
 #ifdef BB_CALL_TEST
     // Developer builds only (package.ps1 -DevTools): the call-audio test
     // driven by calltest.json in the SHARED folder -- any app able to write
@@ -1662,6 +1664,7 @@ void Service::handlePushEvent(const QByteArray &payload)
 void Service::onPushPingTimeout()
 {
     if (g_memoryGuard) g_memoryGuard->check(); // awake anyway: see memoryguard.hpp
+    if (m_calls) m_calls->keepAlive(); // the call link's ping, in the same wake-up
     if (m_pushSocket->state() == QAbstractSocket::ConnectedState && m_pushHandshakeDone) {
         QByteArray pingFrame;
         pingFrame.append(char(0x89)); // FIN + Ping

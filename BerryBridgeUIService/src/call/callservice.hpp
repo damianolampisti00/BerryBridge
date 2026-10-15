@@ -46,6 +46,9 @@ public:
     static QString socketPath();
 
 public slots:
+    // Ping the gateway link now: the service does it with its push ping, one
+    // wake-up for both.
+    void keepAlive();
     // Re-read callServerUrl/callToken and (re)connect.
     void reloadConfig();
 

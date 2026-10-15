@@ -52,6 +52,10 @@ signals:
     void textMessage(const QByteArray &utf8);
     void binaryMessage(const QByteArray &data);
 
+public slots:
+    // Ping now (an outside timer: see kKeepAliveMs).
+    void keepAliveNow();
+
 private slots:
     void onConnected();
     void onReadyRead();
@@ -66,6 +70,7 @@ private:
     bool sendFrame(int opcode, const QByteArray &payload);
     void processFrames();
     void finish(const QString &reason);
+    static bool isSecure(const QUrl &url);
 
     QSslSocket *m_socket;
     int m_lookup; // which open() the pending lookup is for

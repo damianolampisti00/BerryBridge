@@ -401,6 +401,11 @@ void CallService::setState(State s, const QString &reason)
     if (s == Ended) QTimer::singleShot(4000, this, SLOT(finishEnded()));
 }
 
+void CallService::keepAlive()
+{
+    if (m_link) QMetaObject::invokeMethod(m_link, "keepAlive", Qt::QueuedConnection);
+}
+
 void CallService::finishEnded()
 {
     if (m_state != Ended) return;

@@ -103,6 +103,11 @@ void CallLink::sendText(const QByteArray &utf8)
     if (m_ws && m_ws->isOpen()) m_ws->sendText(utf8);
 }
 
+void CallLink::keepAlive()
+{
+    if (m_ws) m_ws->keepAliveNow();
+}
+
 void CallLink::setAudio(AudioRing *uplink, AudioRing *downlink)
 {
     m_uplink = uplink;
