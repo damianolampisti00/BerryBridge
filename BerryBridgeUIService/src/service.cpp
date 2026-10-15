@@ -44,7 +44,7 @@ static QString stateSettingsPath()
 #include "freshresolver.hpp"
 #include <new>
 
-extern volatile int g_memoryTrouble; // main.cpp, memoryguard.hpp
+#include "memoryguard.hpp"
 
 #include <QTimer>
 
@@ -981,6 +981,7 @@ void Service::initDatabases() {
 void Service::startPushConnection()
 {
     qDebug() << "[service.cpp] [PUSH] starting push connection.";
+    if (g_memoryGuard) g_memoryGuard->check(); // a failing link may be a full heap
     if (!m_initRun) return;
 
     if (m_netConfManager && !m_netConfManager->isOnline()) return;
@@ -1280,7 +1281,10 @@ void Service::onPushReadyRead()
 
     } catch (const std::exception& e) {
         qWarning() << "[service.cpp] [PUSH-ERROR] Caught standard exception in onPushReadyRead:" << e.what();
-        if (dynamic_cast<const std::bad_alloc *>(&e)) g_memoryTrouble = 1; // memoryguard.hpp restarts us
+        if (dynamic_cast<const std::bad_alloc *>(&e)) {
+            g_memoryTrouble = 1;
+            if (g_memoryGuard) QTimer::singleShot(0, g_memoryGuard, SLOT(check())); // restarts us outside a call
+        }
     } catch (...) {
         qWarning() << "[service.cpp] [PUSH-ERROR] Caught unknown exception in onPushReadyRead!";
     }
@@ -1657,6 +1661,7 @@ void Service::handlePushEvent(const QByteArray &payload)
 
 void Service::onPushPingTimeout()
 {
+    if (g_memoryGuard) g_memoryGuard->check(); // awake anyway: see memoryguard.hpp
     if (m_pushSocket->state() == QAbstractSocket::ConnectedState && m_pushHandshakeDone) {
         QByteArray pingFrame;
         pingFrame.append(char(0x89)); // FIN + Ping
