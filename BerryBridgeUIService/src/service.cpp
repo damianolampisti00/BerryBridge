@@ -42,6 +42,9 @@ static QString stateSettingsPath()
 #include <time.h>
 #include <resolv.h>
 #include "freshresolver.hpp"
+#include <new>
+
+extern volatile int g_memoryTrouble; // main.cpp, memoryguard.hpp
 
 #include <QTimer>
 
@@ -878,6 +881,9 @@ void Service::initDatabases() {
             query.exec("PRAGMA journal_mode=WAL;");
             query.exec("PRAGMA synchronous=NORMAL;");
             query.exec("PRAGMA busy_timeout=5000;"); // Kilitlenmeleri önlemek için şart
+            // A small page cache: the service has ~2.9 MB of heap in the
+            // background (memoryguard.hpp); SQLite's default may take 2 MB.
+            query.exec("PRAGMA cache_size=-128;");
 
             // UI tarafındaki şemanın birebir aynısı (Sonundaki virgül hatası düzeltildi)
             bool success = query.exec(
@@ -931,6 +937,7 @@ void Service::initDatabases() {
             query.exec("PRAGMA journal_mode=WAL;");
             query.exec("PRAGMA synchronous=NORMAL;");
             query.exec("PRAGMA busy_timeout=5000;");
+            query.exec("PRAGMA cache_size=-128;"); // see messages_db_conn
 
             // UI tarafındaki chats şemasının birebir aynısı
             QString createTable = "CREATE TABLE IF NOT EXISTS chats ("
@@ -1273,6 +1280,7 @@ void Service::onPushReadyRead()
 
     } catch (const std::exception& e) {
         qWarning() << "[service.cpp] [PUSH-ERROR] Caught standard exception in onPushReadyRead:" << e.what();
+        if (dynamic_cast<const std::bad_alloc *>(&e)) g_memoryTrouble = 1; // memoryguard.hpp restarts us
     } catch (...) {
         qWarning() << "[service.cpp] [PUSH-ERROR] Caught unknown exception in onPushReadyRead!";
     }

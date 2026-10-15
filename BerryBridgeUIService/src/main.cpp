@@ -29,6 +29,7 @@
 #include <QLocalSocket>
 
 #include "serviceguard.hpp"
+#include "memoryguard.hpp"
 #include <exception>
 #include <QDir>
 #include <QFile>
@@ -53,6 +54,8 @@ static void fileMessageHandler(QtMsgType type, const char *msg)
 #endif
 
 using namespace bb;
+
+volatile int g_memoryTrouble = 0;
 
 // An exception out of an event handler (Qt 4 throws std::bad_alloc, for one)
 // used to abort the whole service -- calls and notifications gone until the
@@ -80,6 +83,7 @@ private:
     // that socket, its owner reconnects or drops it. Logged a few times only.
     void recover(QObject *receiver, QEvent *event, const char *what)
     {
+        if (strstr(what, "bad_alloc") || strstr(what, "bad allocation")) g_memoryTrouble = 1;
         QObject *socket = 0;
         for (QObject *p = receiver; p && !socket; p = p->parent()) {
             if (qobject_cast<QAbstractSocket *>(p) || qobject_cast<QLocalSocket *>(p)) socket = p;
@@ -110,6 +114,7 @@ int main(int argc, char **argv)
     qInstallMsgHandler(fileMessageHandler);
 #endif
     ServiceApplication app(argc, argv);
+    MemoryGuard memoryGuard(argv); // see memoryguard.hpp
 
     // Create the Application UI object, this is where the main.qml file
     // is loaded and the application scene is set.
