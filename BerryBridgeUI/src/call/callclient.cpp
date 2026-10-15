@@ -30,10 +30,24 @@ CallClient::CallClient(QObject *parent) :
     connect(m_socket, SIGNAL(error(QLocalSocket::LocalSocketError)), this, SLOT(onDisconnected()));
     m_retry.setInterval(2000);
     connect(&m_retry, SIGNAL(timeout()), this, SLOT(connectToService()));
+    // The call timer's tick: only during a call (it woke the phone every
+    // second for as long as the app was open). See updateTicker().
     m_ticker.setInterval(1000);
     connect(&m_ticker, SIGNAL(timeout()), this, SIGNAL(tick()));
-    m_ticker.start();
+    connect(this, SIGNAL(changed()), this, SLOT(updateTicker()));
     connectToService();
+}
+
+void CallClient::updateTicker()
+{
+    const QString s = state();
+    const bool live = !s.isEmpty() && s != "idle";
+    if (live && !m_ticker.isActive()) {
+        m_ticker.start();
+        emit tick();
+    } else if (!live && m_ticker.isActive()) {
+        m_ticker.stop();
+    }
 }
 
 void CallClient::connectToService()
