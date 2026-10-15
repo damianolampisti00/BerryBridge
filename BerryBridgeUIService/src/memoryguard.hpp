@@ -50,6 +50,13 @@ public:
     explicit MemoryGuard(char **argv, QObject *parent = 0) :
             QObject(parent), m_argv(argv), m_waitingForCall(false)
     {
+        // Read now: in the broken state restartForNetwork() is for, opening
+        // any file fails (2026-10-15 20:44-01:07: the log stopped, the
+        // restart gave up for want of this path and the service hung on).
+        QFile f("/proc/self/exefile");
+        if (f.open(QIODevice::ReadOnly)) m_exe = f.readAll().trimmed();
+        while (m_exe.endsWith('\0')) m_exe.chop(1);
+        if (!m_exe.isEmpty() && !m_exe.startsWith('/')) m_exe.prepend('/');
         raiseLimit();
         g_memoryGuard = this;
         QTimer::singleShot(10000, this, SLOT(report()));
@@ -141,14 +148,9 @@ private:
 
     void restart(qint64 now)
     {
-        // The executable, as the system records it (a path without the
-        // leading slash, e.g. "accounts/1000/appdata/.../BerryBridgeUIService").
-        QByteArray exe;
-        QFile f("/proc/self/exefile");
-        if (f.open(QIODevice::ReadOnly)) exe = f.readAll().trimmed();
-        if (exe.endsWith('\0')) exe.chop(1);
-        if (!exe.isEmpty() && !exe.startsWith('/')) exe.prepend('/');
-        if (exe.isEmpty()) return;
+        // The executable as the system records it at start (the constructor).
+        const QByteArray exe = m_exe;
+        if (exe.isEmpty()) _exit(1); // no way to re-exec: at least stop the broken process
         setenv("BB_MEMGUARD_LAST", QByteArray::number(now).constData(), 1);
         // Nothing of this image is carried over: sockets, PPS objects, the
         // databases and the call control socket are all opened again.
@@ -158,6 +160,7 @@ private:
     }
 
     char **m_argv;
+    QByteArray m_exe; // "/accounts/1000/appdata/.../BerryBridgeUIService"
     bool m_waitingForCall;
 };
 

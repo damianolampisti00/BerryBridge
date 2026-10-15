@@ -70,6 +70,8 @@ Service::Service() :
         m_calls(0),
         m_cacheActive(false),
         m_pushResolving(false),
+        m_pushConnectTimer(new QTimer(this)),
+        m_pushAttempt(0),
         m_pushEncrypted(true),
         m_pushPort(443)
 {
@@ -739,6 +741,7 @@ void Service::handleConnectivityChange(bool isOnline)
          }
          m_pushPingTimer->stop();
          m_pushWatchdogTimer->stop();
+         m_pushConnectTimer->stop();
     }
 }
 
@@ -1093,7 +1096,12 @@ void Service::startPushConnection()
     m_pushEncrypted = isEncrypted;
     m_pushPort = port;
     m_pushResolving = true;
+    ++m_pushAttempt;
+    m_pushConnectTimer->setSingleShot(true);
+    connect(m_pushConnectTimer, SIGNAL(timeout()), this, SLOT(onPushConnectDeadline()), Qt::UniqueConnection);
+    m_pushConnectTimer->start(45000);
     FreshResolver *resolver = new FreshResolver(host);
+    resolver->setProperty("attempt", m_pushAttempt);
     connect(resolver, SIGNAL(resolved(QString,QHostAddress)), this, SLOT(onPushResolved(QString,QHostAddress)));
     resolver->start();
 
@@ -1139,8 +1147,24 @@ void Service::onPushConnected()
     m_pushWatchdogTimer->start(130000);
 }
 
+void Service::onPushConnectDeadline()
+{
+    if (m_pushHandshakeDone) return;
+    qWarning() << "[service.cpp] [PUSH] not connected after 45 s ("
+               << (m_pushResolving ? "DNS lookup hanging" : "connection hanging") << ") - starting over";
+    m_pushResolving = false; // that lookup's answer, if it ever comes, is dropped
+    ++m_pushAttempt;
+    disconnect(m_pushSocket, SIGNAL(disconnected()), this, SLOT(onPushDisconnected()));
+    m_pushSocket->abort();
+    QTimer::singleShot(5000, this, SLOT(startPushConnection()));
+}
+
 void Service::onPushResolved(const QString &host, const QHostAddress &address)
 {
+    if (sender() && sender()->property("attempt").toInt() != m_pushAttempt) {
+        qDebug() << "[service.cpp] [PUSH] late DNS answer for" << host << "- ignored";
+        return;
+    }
     m_pushResolving = false;
     if (address.isNull()) {
         qDebug() << "[service.cpp] [PUSH] DNS lookup failed for" << host << "- retry in 10s...";
@@ -1199,6 +1223,7 @@ void Service::onPushReadyRead()
                 m_pushRefused = 0;
                 m_pushHandshakeDone = true;
                 m_pushDownSince.invalidate();
+                m_pushConnectTimer->stop();
                 m_wsBuffer.remove(0, idx + 4);
                 qDebug() << "[service.cpp] [PUSH] WebSocket Handshake complete!";
 
