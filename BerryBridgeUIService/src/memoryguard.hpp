@@ -110,6 +110,22 @@ public slots:
         restart(now);
     }
 
+    // The process itself has lost the network (seen 2026-10-15 16:31-18:00 with
+    // memory far from the cap: every lookup "No address associated with
+    // hostname", every socket "Protocol type not supported", even the log file
+    // stopped being written, while the rest of the phone was online). Only a
+    // new process image has ever cured it. Same rules as for memory: never in
+    // a call, at most once in 10 minutes.
+    void restartForNetwork(qint64 downForSeconds)
+    {
+        if (QFile::exists(QDir::homePath() + "/call_active")) return;
+        const qint64 now = QDateTime::currentMSecsSinceEpoch() / 1000;
+        const qint64 last = qgetenv("BB_MEMGUARD_LAST").toLongLong();
+        if (last > 0 && now - last < 600) return;
+        qWarning() << "[HEALTH] push link down for" << downForSeconds << "s - restarting the service";
+        restart(now);
+    }
+
 private:
     void raiseLimit()
     {
