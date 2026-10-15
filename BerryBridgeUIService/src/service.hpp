@@ -30,6 +30,7 @@
 #include <QSqlQuery>
 #include <QSqlError>
 #include <QSettings>
+#include <QHash>
 #include <QQueue>
 
 namespace bb {
@@ -61,6 +62,10 @@ signals:
     void messagesUpdated();
 
 private slots:
+    // The data cache's lifetime (cachepaths.hpp): created when the app opens,
+    // deleted when it closes.
+    void onUiClients(int count);
+    void wipeIfNoUi();
     // Any finished request: "Host not found" reloads the DNS servers (read
     // once per process; stale after a move to another Wi-Fi).
     void onAnyReplyFinished(QNetworkReply *reply);
@@ -119,6 +124,15 @@ private:
     bool m_pushEncrypted;
     quint16 m_pushPort;
     bool m_initRun;
+    // The cache exists (the app is open): pushes are stored in it. Otherwise
+    // they only become notifications (notifyWithoutCache), with the chats'
+    // names/types/mute fetched from Beeper and kept in memory (m_chatMeta).
+    bool m_cacheActive;
+    QHash<QString, QVariantMap> m_chatMeta;
+    QStringList m_recentMsgIds;
+    void closeDatabases();
+    void notifyWithoutCache(const QVariantMap &push);
+    QVariantMap chatMeta(const QString &chatID);
     QString m_url;
     QByteArray m_wsBuffer;
     QVariantMap fetchChatMetadataSync(const QString &chatId);

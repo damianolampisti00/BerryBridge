@@ -1,3 +1,4 @@
+#include "../../../BerryBridgeUIService/src/cachepaths.hpp"
 #include "callclient.hpp"
 
 #include <QDateTime>
@@ -8,7 +9,7 @@
 #include <bb/data/SqlDataAccess>
 
 namespace {
-const char *const kChatsDb = "/accounts/1000/shared/misc/BerryBridge/chats.db";
+static QString chatsDb() { return bbCachePath("chats.db"); }
 
 QVariant parseJson(const QString &text)
 {
@@ -141,7 +142,7 @@ bool CallClient::isWhatsAppAccount(const QString &accountID) const
 
 QString CallClient::phoneForChat(const QString &chatID) const
 {
-    bb::data::SqlDataAccess sda(kChatsDb);
+    bb::data::SqlDataAccess sda(chatsDb());
     QVariantMap params;
     params["id"] = chatID;
     const QVariantList rows = sda.execute("SELECT participants_json FROM chats WHERE id = :id LIMIT 1", params).toList();

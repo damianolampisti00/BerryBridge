@@ -13,6 +13,7 @@
 #include <QTimer>
 #include <QtNetwork/QNetworkConfigurationManager>
 #include <QSet>
+#include <QHash>
 #include <QMap>
 
 class Database : public QObject
@@ -110,6 +111,9 @@ signals:
 
 
 private slots:
+    // The cache (cachepaths.hpp) is empty when the app opens: the chat list
+    // comes from Beeper, messages page by page as chats are opened/scrolled.
+    void rebuildCache();
     // Any finished request: "Host not found" reloads the DNS servers (read
     // once per process; stale after a move to another Wi-Fi).
     void onAnyReplyFinished(QNetworkReply *reply);
@@ -146,6 +150,13 @@ private:
     QNetworkReply* m_chatsReply;
     QNetworkReply* m_chatsDetailsReply;
     QNetworkReply* m_initialSyncReply; // mesajların çekilmesi
+    // Messages on demand: per chat, the cursor of the next older page from
+    // Beeper ("" = none fetched yet, "END" = all there), and pages in flight.
+    QHash<QString, QString> m_chatCursor;
+    QSet<QString> m_msgFetching;
+    void fetchChatPage(const QString &chatId);
+    void upsertChatRow(const QVariantMap &rawChat);
+    void touchRefresh();
     static const QString BEARER_TOKEN;
     static const QString API_BASE;
     bool initContext();
