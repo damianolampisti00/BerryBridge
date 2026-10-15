@@ -13,7 +13,10 @@
 
 namespace {
 const char *const kGuid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
-const int kKeepAliveMs = 45000;   // ping this often (Cloudflare drops idle links after 100 s)...
+// Cloudflare drops idle links after 100 s. The service pings this link
+// together with its push link (keepAliveNow, every 50 s), so the phone wakes
+// once for both; this timer is only the fallback while that one is down.
+const int kKeepAliveMs = 80000;   // ping at least this often...
 const int kSilenceMs = 110000;    // ...and give up after this long without any data
 const int kMaxMessage = 1 << 20;  // a call gateway never sends anything near this
 
@@ -58,6 +61,16 @@ WebSocketClient::~WebSocketClient()
     if (m_socket) m_socket->abort();
 }
 
+// wss://, and https:// as well: the call server's address is typed in the
+// app's Settings like a web address. Only wss counted as secure, so
+// "https://calls.../ws" made a PLAIN connection on port 80 -- the token and
+// the call audio crossed the internet unencrypted (found 2026-10-15).
+bool WebSocketClient::isSecure(const QUrl &url)
+{
+    const QString s = url.scheme().toLower();
+    return s == "wss" || s == "https";
+}
+
 void WebSocketClient::open(const QUrl &url, const Headers &headers, bool verifyPeer)
 {
     if (m_socket) {
@@ -82,7 +95,7 @@ void WebSocketClient::open(const QUrl &url, const Headers &headers, bool verifyP
     // Small, frequent audio frames: no Nagle delay.
     m_socket->setSocketOption(QAbstractSocket::LowDelayOption, 1);
 
-    const bool secure = url.scheme().compare("wss", Qt::CaseInsensitive) == 0;
+    const bool secure = isSecure(url);
     const int port = url.port(secure ? 443 : 80);
     m_secure = secure;
     m_port = quint16(port);
@@ -132,7 +145,7 @@ void WebSocketClient::onConnected()
     if (path.isEmpty()) path = "/";
     if (m_url.hasQuery()) path += "?" + m_url.encodedQuery();
     QByteArray host = m_url.host().toLatin1();
-    const bool secure = m_url.scheme().compare("wss", Qt::CaseInsensitive) == 0;
+    const bool secure = isSecure(m_url);
     if (m_url.port() > 0 && m_url.port() != (secure ? 443 : 80)) host += ":" + QByteArray::number(m_url.port());
     QByteArray req = "GET " + path + " HTTP/1.1\r\n"
                      "Host: " + host + "\r\n"
@@ -302,6 +315,13 @@ void WebSocketClient::close(quint16 code, const QByteArray &reason)
     } else if (m_socket && m_state != Idle) {
         finish("closed by us");
     }
+}
+
+void WebSocketClient::keepAliveNow()
+{
+    if (m_state != Open) return;
+    m_keepAlive.start(); // the fallback timer starts over
+    onKeepAlive();
 }
 
 void WebSocketClient::onKeepAlive()

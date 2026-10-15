@@ -45,6 +45,8 @@ public slots:
     void sendText(const QByteArray &utf8);
     // Attach/detach the call's audio (0, 0 = none). Rings outlive the call.
     void setAudio(AudioRing *uplink, AudioRing *downlink);
+    // The gateway link's keepalive, timed by the service (see websocketclient.cpp).
+    void keepAlive();
 
 signals:
     void linkOpened();

@@ -113,6 +113,7 @@ private:
     // Direct WebSocket State
     bool m_pushHandshakeDone;
     int m_pushRefused; // handshakes in a row the server answered with an error
+    class CallService *m_calls; // pinged together with the push link
     bool m_pushResolving; // a FreshResolver lookup is under way
     bool m_pushEncrypted;
     quint16 m_pushPort;
