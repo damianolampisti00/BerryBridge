@@ -52,6 +52,11 @@ public slots:
     // Re-read callServerUrl/callToken and (re)connect.
     void reloadConfig();
 
+signals:
+    // The app's UI connected or went away (its CallClient): the service keeps
+    // the data cache only while it is open (Service::onUiClients).
+    void uiClientsChanged(int count);
+
 private slots:
     void onLinkOpened();
     void onLinkClosed(const QString &reason);

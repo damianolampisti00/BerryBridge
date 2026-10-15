@@ -253,6 +253,7 @@ void CallService::onNewClient()
         connect(s, SIGNAL(disconnected()), this, SLOT(onClientGone()));
         s->write(toJson(statusMap()) + "\n");
     }
+    emit uiClientsChanged(m_clients.size());
 }
 
 void CallService::onClientGone()
@@ -260,6 +261,7 @@ void CallService::onClientGone()
     QLocalSocket *s = qobject_cast<QLocalSocket *>(sender());
     m_clients.removeAll(s);
     if (s) s->deleteLater();
+    emit uiClientsChanged(m_clients.size());
 }
 
 void CallService::onClientData()
