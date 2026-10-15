@@ -1110,6 +1110,11 @@ void Service::onPushResolved(const QString &host, const QHostAddress &address)
 
 void Service::onPushDisconnected()
 {
+    // Why, when it didn't get as far as an error (the DNS fallback's
+    // connections ended this way within 300 ms, 2026-10-15).
+    if (!m_pushHandshakeDone)
+        qDebug() << "[service.cpp] [PUSH] closed before the handshake:" << m_pushSocket->error()
+                 << m_pushSocket->errorString() << "peer" << m_pushSocket->peerAddress().toString();
     //sendStatusNotification("Push Connection", "Disconnected from Server. Reconnecting...");
     m_pushPingTimer->stop();
     m_pushWatchdogTimer->stop();

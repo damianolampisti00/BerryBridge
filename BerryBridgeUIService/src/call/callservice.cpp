@@ -164,8 +164,28 @@ void CallService::onGatewayText(const QByteArray &utf8)
     qDebug() << "[CALL] <<" << utf8.left(300);
 
     if (type == "hello") {
-        // After a service restart mid-call: pick the call back up.
         const QVariantList calls = ev.value("calls").toList();
+        // Our call ended while the link was down (its call.ended never came):
+        // seen 2026-10-15, an incoming call hung up by the caller the moment
+        // the link dropped left the phone "in a call" (and installs blocked)
+        // for an hour.
+        if (m_state != Idle && m_state != Ended && !m_callId.isEmpty()) {
+            bool known = false;
+            for (int i = 0; i < calls.size() && !known; ++i)
+                known = calls.at(i).toMap().value("callId").toString() == m_callId;
+            if (!known) {
+                qDebug() << "[CALL] call" << m_callId << "ended while the link was down";
+                const bool missed = (m_state == Incoming);
+                ring(false);
+                stopAudio();
+                setState(Ended, "ended");
+                if (missed) {
+                    postHubNotification("Chiamata WhatsApp persa", m_name.isEmpty() ? m_phone : m_name,
+                                        "call-missed-" + m_callId);
+                }
+            }
+        }
+        // After a service restart mid-call: pick the call back up.
         for (int i = 0; i < calls.size() && m_state == Idle; ++i) {
             const QVariantMap c = calls.at(i).toMap();
             m_callId = c.value("callId").toString();
