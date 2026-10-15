@@ -1,3 +1,4 @@
+#include "../../../BerryBridgeUIService/src/cachepaths.hpp"
 #include "viewonceclient.hpp"
 
 #include <QDateTime>
@@ -48,7 +49,7 @@ bool ViewOnceClient::isViewOnceNotice(const QString &text)
 QString ViewOnceClient::instagramPeer(const QString &accountID, const QString &chatID) const
 {
     if (!accountID.startsWith("instagram")) return QString();
-    bb::data::SqlDataAccess sda("/accounts/1000/shared/misc/BerryBridge/chats.db");
+    bb::data::SqlDataAccess sda(bbCachePath("chats.db"));
     QVariantMap params;
     params["id"] = chatID;
     const QVariantList rows = sda.execute("SELECT type, participants_json FROM chats WHERE id = :id LIMIT 1",
