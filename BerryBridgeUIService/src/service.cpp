@@ -42,6 +42,7 @@ static QString stateSettingsPath()
 #include <time.h>
 #include <resolv.h>
 #include "freshresolver.hpp"
+#include "tlspolicy.hpp"
 #include <new>
 
 #include "memoryguard.hpp"
@@ -73,10 +74,10 @@ Service::Service() :
     // (QNetworkAccessManager üzerinden yapılacak REST API istekleri için varsayılan ayar)
     QSslConfiguration sslConfig = QSslConfiguration::defaultConfiguration();
     sslConfig.setProtocol(QSsl::SecureProtocols);
-    sslConfig.setPeerVerifyMode(QSslSocket::VerifyNone);
+    sslConfig.setPeerVerifyMode(QSslSocket::VerifyPeer); // see tlspolicy.hpp
     QSslConfiguration::setDefaultConfiguration(sslConfig);
 
-    // REST istekleri için SSL hata bastırma
+    // Certificate errors: tolerated for a server on the LAN only (tlspolicy.hpp)
     connect(m_networkManager, SIGNAL(sslErrors(QNetworkReply*, QList<QSslError>)),
             this, SLOT(onGlobalSslErrors(QNetworkReply*, QList<QSslError>)));
 
@@ -136,10 +137,24 @@ Service::Service() :
 
 // Servis REST istekleri SSL slotu
 void Service::onGlobalSslErrors(QNetworkReply *reply, const QList<QSslError> &errors) {
-    Q_UNUSED(errors);
-    if (reply) {
+    if (!reply) return;
+    if (tlsLocalHost(reply->url().host())) {
         reply->ignoreSslErrors();
+        return;
     }
+    QStringList list;
+    for (int i = 0; i < errors.size(); ++i) list << errors.at(i).errorString();
+    qWarning() << "[service.cpp] TLS certificate refused for" << reply->url().host() << list.join("; ");
+}
+
+void Service::onPushSslErrors(const QList<QSslError> &errors) {
+    if (tlsLocalHost(QUrl(m_url).host())) {
+        m_pushSocket->ignoreSslErrors();
+        return;
+    }
+    QStringList list;
+    for (int i = 0; i < errors.size(); ++i) list << errors.at(i).errorString();
+    qWarning() << "[service.cpp] [PUSH] TLS certificate refused:" << list.join("; ");
 }
 
 
@@ -1022,7 +1037,7 @@ void Service::startPushConnection()
     disconnect(m_pushSocket, SIGNAL(disconnected()), this, SLOT(onPushDisconnected()));
     disconnect(m_pushSocket, SIGNAL(readyRead()), this, SLOT(onPushReadyRead()));
     disconnect(m_pushSocket, SIGNAL(error(QAbstractSocket::SocketError)), this, SLOT(onPushError(QAbstractSocket::SocketError)));
-    disconnect(m_pushSocket, SIGNAL(sslErrors(QList<QSslError>)), m_pushSocket, SLOT(ignoreSslErrors()));
+    disconnect(m_pushSocket, SIGNAL(sslErrors(QList<QSslError>)), this, SLOT(onPushSslErrors(QList<QSslError>)));
 
     if (m_pushSocket->state() != QAbstractSocket::UnconnectedState) {
         m_pushSocket->abort();
@@ -1040,12 +1055,12 @@ void Service::startPushConnection()
         // --- SSL / TLS Bağlantısı ---
         QSslConfiguration sslConfig = QSslConfiguration::defaultConfiguration();
         sslConfig.setProtocol(QSsl::SecureProtocols); // Qt 4.8 TLS 1.2
-        sslConfig.setPeerVerifyMode(QSslSocket::VerifyNone);
+        sslConfig.setPeerVerifyMode(QSslSocket::VerifyPeer); // see tlspolicy.hpp
         m_pushSocket->setSslConfiguration(sslConfig);
 
         // SSL El sıkışması bittiğinde onPushConnected çağrılır
         connect(m_pushSocket, SIGNAL(encrypted()), this, SLOT(onPushConnected()), Qt::UniqueConnection);
-        connect(m_pushSocket, SIGNAL(sslErrors(QList<QSslError>)), m_pushSocket, SLOT(ignoreSslErrors()), Qt::UniqueConnection);
+        connect(m_pushSocket, SIGNAL(sslErrors(QList<QSslError>)), this, SLOT(onPushSslErrors(QList<QSslError>)), Qt::UniqueConnection);
 
         qDebug() << "[PUSH] Guvenli TLS SSL baglantisi kuruluyor..." << host << ":" << port;
     } else {

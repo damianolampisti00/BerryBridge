@@ -76,6 +76,7 @@ private slots:
     void onPushReadyRead();
     void onPushError(QAbstractSocket::SocketError socketError);
     void onPushResolved(const QString &host, const QHostAddress &address);
+    void onPushSslErrors(const QList<QSslError> &errors);
     void onPushPingTimeout();
     void onPushWatchdogTimeout();
     void onStatusUpdateTimeout();
