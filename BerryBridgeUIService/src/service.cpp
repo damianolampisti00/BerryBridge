@@ -1010,6 +1010,12 @@ void Service::initDatabases() {
 void Service::startPushConnection()
 {
     qDebug() << "[service.cpp] [PUSH] starting push connection.";
+    // Down for minutes while retrying: see MemoryGuard::restartForNetwork.
+    // Checked before the online test below, which a broken process can get
+    // wrong too (its retries then stop for good).
+    if (!m_pushDownSince.isValid()) m_pushDownSince.start();
+    else if (m_pushDownSince.elapsed() > 4 * 60 * 1000 && g_memoryGuard)
+        g_memoryGuard->restartForNetwork(m_pushDownSince.elapsed() / 1000);
     if (g_memoryGuard) g_memoryGuard->check(); // a failing link may be a full heap
     if (!m_initRun) return;
 
@@ -1192,6 +1198,7 @@ void Service::onPushReadyRead()
                 }
                 m_pushRefused = 0;
                 m_pushHandshakeDone = true;
+                m_pushDownSince.invalidate();
                 m_wsBuffer.remove(0, idx + 4);
                 qDebug() << "[service.cpp] [PUSH] WebSocket Handshake complete!";
 

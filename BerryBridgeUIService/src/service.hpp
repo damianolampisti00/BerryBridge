@@ -31,6 +31,7 @@
 #include <QSqlError>
 #include <QSettings>
 #include <QHash>
+#include <QElapsedTimer>
 #include <QQueue>
 
 namespace bb {
@@ -118,6 +119,7 @@ private:
     void handlePushEvent(const QByteArray &payload);
     // Direct WebSocket State
     bool m_pushHandshakeDone;
+    QElapsedTimer m_pushDownSince; // valid while the push link is down
     int m_pushRefused; // handshakes in a row the server answered with an error
     class CallService *m_calls; // pinged together with the push link
     bool m_pushResolving; // a FreshResolver lookup is under way
