@@ -1,3 +1,4 @@
+#include "../../BerryBridgeUIService/src/tlspolicy.hpp"
 #include <resolv.h>
 #include "Database.hpp"
 #include <QDir>
@@ -47,7 +48,7 @@ Database::Database(QObject *parent) : QObject(parent)
     // --- GLOBAL SSL/TLS KONFİGÜRASYONU ---
     QSslConfiguration sslConfig = QSslConfiguration::defaultConfiguration();
     sslConfig.setProtocol(QSsl::SecureProtocols);
-    sslConfig.setPeerVerifyMode(QSslSocket::VerifyNone);
+    sslConfig.setPeerVerifyMode(QSslSocket::VerifyPeer); // see tlspolicy.hpp
     QSslConfiguration::setDefaultConfiguration(sslConfig);
 
     m_initRun = m_settings.value("initRun", false).toBool();
@@ -87,10 +88,14 @@ Database::Database(QObject *parent) : QObject(parent)
 
 // REST Isteklerinde olusan SSL hatalarini otomatik bastiran slot
 void Database::onGlobalSslErrors(QNetworkReply *reply, const QList<QSslError> &errors) {
-    Q_UNUSED(errors);
-    if (reply) {
+    if (!reply) return;
+    if (tlsLocalHost(reply->url().host())) { // tlspolicy.hpp: a LAN server only
         reply->ignoreSslErrors();
+        return;
     }
+    QStringList list;
+    for (int i = 0; i < errors.size(); ++i) list << errors.at(i).errorString();
+    qWarning() << "[DATABASE] TLS certificate refused for" << reply->url().host() << list.join("; ");
 }
 
 bool Database::initRun() const {
@@ -225,9 +230,7 @@ void Database::fetchAccounts() {
             return;
         }
 
-        // --- SERTİFİKA HATALARI İÇİN SON GÜVENCE ---
-        // Protokol uyuşsa bile sertifika zincirinden patlamasını engeller
-        m_accountsReply->ignoreSslErrors();
+        // Certificate errors: onGlobalSslErrors (a LAN server only).
 
         connect(m_accountsReply, SIGNAL(finished()), this, SLOT(onAccountsFetched()));
         emit syncProgress("Fetching accounts...", chatPercent);
@@ -1947,7 +1950,6 @@ void Database::sendMessage(const QString &accountID, const QString &chatID, cons
     QUrl url(m_url + "/v1/chats/" + chatID + "/messages");
     QNetworkRequest request(url);
     qDebug()<<"url"<<url;
-    qDebug()<<"m_accessToken"<<m_accessToken;
 
     QString authHeader = "Bearer " + m_accessToken;
     request.setRawHeader("Authorization", authHeader.toLatin1());
@@ -1978,8 +1980,6 @@ void Database::sendMessage(const QString &accountID, const QString &chatID, cons
 
     QNetworkReply* reply = m_netManager->post(request, jsonData);
     reply->setProperty("pendingMsgID", pendingMsgID);
-    // BB10 QNAM HTTPS/SSL hatalarını yoksaymak için:
-    connect(reply, SIGNAL(sslErrors(QList<QSslError>)), reply, SLOT(ignoreSslErrors()));
     connect(reply, SIGNAL(finished()), this, SLOT(onMessageSent()));
 }
 
