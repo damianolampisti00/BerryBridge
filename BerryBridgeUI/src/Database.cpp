@@ -53,6 +53,7 @@ Database::Database(QObject *parent) : QObject(parent)
     QSslConfiguration::setDefaultConfiguration(sslConfig);
 
     m_initRun = m_settings.value("initRun", false).toBool();
+    m_cacheRetries = 0;
     m_netManager = new QNetworkAccessManager(this);
     connect(m_netManager, SIGNAL(finished(QNetworkReply*)), this, SLOT(onAnyReplyFinished(QNetworkReply*)));
 
@@ -95,6 +96,12 @@ void Database::rebuildCache()
     qDebug() << "[CACHE] filling the chat list from Beeper";
     initContext();
     syncChats("", "CACHE_FILL");
+}
+
+void Database::retryCacheFill()
+{
+    if (m_url.isEmpty() || m_accessToken.isEmpty()) return;
+    syncChats(m_cacheRetryCursor, "CACHE_FILL");
 }
 
 void Database::touchRefresh()
@@ -624,6 +631,7 @@ void Database::syncChats(const QString &cursor, QString callbackAction) {
 
     m_chatsReply = m_netManager->get(request);
     m_chatsReply->setProperty("callbackAction", callbackAction);
+    m_chatsReply->setProperty("cursor", cursor);
 
     connect(m_chatsReply, SIGNAL(finished()), this, SLOT(onChatsFetched()));
 
@@ -634,18 +642,31 @@ void Database::onChatsFetched() {
     if (!m_chatsReply) return;
 
     QString callback = m_chatsReply->property("callbackAction").toString();
+    const QString pageCursor = m_chatsReply->property("cursor").toString();
+    const QNetworkReply::NetworkError netError = m_chatsReply->error();
+    const QString netErrorText = m_chatsReply->errorString();
     QByteArray responseData = m_chatsReply->readAll();
 
     m_chatsReply->deleteLater();
     m_chatsReply = 0;
 
     bb::data::JsonDataAccess jda;
-    QVariantMap root = jda.loadFromBuffer(responseData).toMap();
+    QVariantMap root;
+    if (netError == QNetworkReply::NoError) root = jda.loadFromBuffer(responseData).toMap();
 
-    if (jda.hasError()) {
-        qWarning() << "[DATABASE] JSON Parse Error in onChatsFetched";
+    if (netError != QNetworkReply::NoError || jda.hasError()) {
+        if (netError != QNetworkReply::NoError) qWarning() << "[DATABASE] chat list request failed:" << netErrorText;
+        else qWarning() << "[DATABASE] JSON Parse Error in onChatsFetched";
+        if (callback == "CACHE_FILL" && m_cacheRetries < 8) {
+            const int delay = qMin(60000, 5000 << m_cacheRetries);
+            ++m_cacheRetries;
+            m_cacheRetryCursor = pageCursor;
+            qWarning() << "[CACHE] chat list page failed - retry" << m_cacheRetries << "in" << delay / 1000 << "s";
+            QTimer::singleShot(delay, this, SLOT(retryCacheFill()));
+        }
         return;
     }
+    if (callback == "CACHE_FILL") m_cacheRetries = 0;
 
     QVariantList items = root["items"].toList();
     bool hasMore = root["hasMore"].toBool();
