@@ -253,10 +253,17 @@ void Service::startSyncLoop()
     if (!m_cacheActive) return; // no cache to fill: onUiClients starts it with the app
 
     if(!m_initRun){
-        QTimer::singleShot(30000, this, SLOT(startSyncLoop()));
-        qDebug() << "[SERVICE] waiting for m_initRun"<<m_initRun;
+        m_settings.sync();
         m_initRun=m_settings.value("initRun").toBool();
-        return;
+        if (!m_initRun) {
+            QTimer::singleShot(30000, this, SLOT(startSyncLoop()));
+            qDebug() << "[SERVICE] waiting for m_initRun"<<m_initRun;
+            return;
+        }
+        // The first setup finished but its INIT_UPDATE never reached us (it
+        // can get lost): the push link was skipped at start, open it now.
+        qDebug() << "[SERVICE] first setup done, starting the push link";
+        startPushConnection();
     }
     qDebug() << "[SERVICE] startSyncLoop initializing with persistent connections...";
 
@@ -1013,6 +1020,9 @@ void Service::initDatabases() {
 void Service::startPushConnection()
 {
     qDebug() << "[service.cpp] [PUSH] starting push connection.";
+    // Before the first setup there is no link to make. Checked first: the
+    // "down for minutes" clock below must not run while we wait for it.
+    if (!m_initRun) return;
     // Down for minutes while retrying: see MemoryGuard::restartForNetwork.
     // Checked before the online test below, which a broken process can get
     // wrong too (its retries then stop for good).
@@ -1020,7 +1030,6 @@ void Service::startPushConnection()
     else if (m_pushDownSince.elapsed() > 4 * 60 * 1000 && g_memoryGuard)
         g_memoryGuard->restartForNetwork(m_pushDownSince.elapsed() / 1000);
     if (g_memoryGuard) g_memoryGuard->check(); // a failing link may be a full heap
-    if (!m_initRun) return;
 
     if (m_netConfManager && !m_netConfManager->isOnline()) return;
 
