@@ -65,7 +65,7 @@ Page {
                         verticalAlignment: VerticalAlignment.Fill
                         
                         // YENİ EKLENEN KISIM: Seçili olma veya basılma durumuna göre arka plan rengi
-                        background: ListItem.selected || ListItem.active ? Color.create(app.colors.selection) : Color.Transparent
+                        background: ListItem.selected || ListItem.active ? Color.create(Qt.app.colors.selection) : Color.Transparent
                         
                         Label {
                             text: ListItemData

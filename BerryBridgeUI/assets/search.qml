@@ -84,7 +84,7 @@ Page {
                             
                             Label {
                                 text: ListItemData.snippet
-                                textStyle.color: Color.create(app.colors.muted)
+                                textStyle.color: Color.create(Qt.app.colors.muted)
                                 textStyle.fontSize: FontSize.Small
                                 textStyle.fontWeight: FontWeight.W200
                                 multiline: true

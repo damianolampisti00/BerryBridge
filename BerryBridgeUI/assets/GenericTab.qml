@@ -836,7 +836,7 @@ Tab {
                                     // Çerçeve / maske katmanı
                                     ImageButton {
                                         id: circle
-                                        defaultImageSource: app.colors.avatarMask
+                                        defaultImageSource: Qt.app.colors.avatarMask
                                         horizontalAlignment: HorizontalAlignment.Fill
                                         verticalAlignment: VerticalAlignment.Fill
                                         navigation.defaultHighlightEnabled: false

@@ -119,6 +119,10 @@ TabbedPane {
     sidebarState: SidebarState.VisibleFull
     
     onCreationCompleted: {
+        // ListItemComponent delegates can't see context properties ("Can't
+        // find variable: app"): they reach the theme colors as Qt.app.colors.
+        // Set before the tabs (and their lists) are created below.
+        Qt.app = app;
         app.dbUpdateTriggerChanged.connect(function() {
                 refreshTabModels();
         });
