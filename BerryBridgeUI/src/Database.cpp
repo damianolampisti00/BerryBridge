@@ -4374,7 +4374,9 @@ void Database::searchContacts(const QString &accountID, const QString &cursor, c
     }
 
     QUrl url(m_url + "/v1/accounts/" + accountID + "/contacts/list");
-    url.addQueryItem("limit", "10");
+    // No query = the whole address book (the compose page asks for it when it
+    // opens): big pages, the API allows up to 200.
+    url.addQueryItem("limit", searchQuery.isEmpty() ? "100" : "10");
     if (!searchQuery.isEmpty()) url.addQueryItem("query", searchQuery);
     if (!cursor.isEmpty() && cursor != "null") {
         url.addQueryItem("cursor", cursor);
@@ -4508,7 +4510,9 @@ void Database::onContactsFetched() {
                     qWarning() << "[DATABASE] Contact insert error:" << query.lastError().text();
                 }
 
-                if (avatarDbOpen && !contImgUrl.isEmpty()) {
+                // Pictures only for search results: the whole address book
+                // would mean hundreds of full-size downloads.
+                if (avatarDbOpen && !contImgUrl.isEmpty() && !searchQuery.isEmpty()) {
                     avatarQuery.bindValue(0, contactID);
                     bool needsDownload = true;
 

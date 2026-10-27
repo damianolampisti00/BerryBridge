@@ -420,6 +420,12 @@ Page {
         if (combinedData.length > 0) {
             contactModel.insertList(combinedData);
         }
+
+        // Then the account's whole address book from Beeper (the cache starts
+        // empty every time the app opens): onSearchContactsFinished lists it
+        // together with the groups and the phone's contacts.
+        searchAct.running = true;
+        dat.searchContacts(accID, "", "");
     }
     
     function refreshContacts(searchQuery, accID) {
