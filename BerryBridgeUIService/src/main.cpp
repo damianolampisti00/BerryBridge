@@ -21,16 +21,18 @@
 #include <QTranslator>
 
 
-#ifdef BB_FILE_LOG
-#include <QDateTime>
 #include <QDebug>
 #include <QEvent>
 #include <QAbstractSocket>
 #include <QLocalSocket>
+#include <exception>
+#include <string.h>
 
 #include "serviceguard.hpp"
 #include "memoryguard.hpp"
-#include <exception>
+
+#ifdef BB_FILE_LOG
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QTextStream>

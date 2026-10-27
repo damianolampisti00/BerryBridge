@@ -31,7 +31,9 @@ if (Test-Path $config) {
     . $config
     if ($cliPhoneIp) { $PhoneIp = $cliPhoneIp }
     if ($cliRootKey) { $RootKey = $cliRootKey }
-    if ($cliDevTools) { $DevTools = $true }
+    # Given on the command line either way (-DevTools:$false for a public
+    # build), it wins over the config file.
+    if ($PSBoundParameters.ContainsKey('DevTools')) { $DevTools = $cliDevTools }
 }
 $ui = "$root\BerryBridgeUI"
 $svc = "$root\BerryBridgeUIService"
@@ -58,9 +60,13 @@ function Build-Project([string]$pro, [string]$dir) {
     New-Item -ItemType Directory -Force $dir | Out-Null
     Push-Location $dir
     try {
-        # Switching -DevTools on/off needs a fresh qmake run.
+        # Switching -DevTools on/off needs a fresh qmake run, and a full
+        # rebuild: make doesn't recompile objects when only a define changes.
         $flag = "devtools=$([bool]$DevTools)"
-        if ((Test-Path Makefile) -and ((Get-Content .buildflags -ErrorAction SilentlyContinue) -ne $flag)) { Remove-Item Makefile }
+        if ((Test-Path Makefile) -and ((Get-Content .buildflags -ErrorAction SilentlyContinue) -ne $flag)) {
+            # Only build output lives here (build\ui, build\service).
+            Get-ChildItem -Force | Remove-Item -Recurse -Force
+        }
         Set-Content .buildflags $flag
         if (-not (Test-Path Makefile)) {
             qmake $pro -spec blackberry-armv7le-qcc CONFIG+=device CONFIG+=release @extraConfig
