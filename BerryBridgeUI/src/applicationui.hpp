@@ -22,6 +22,7 @@
 #include <QSettings>
 #include <QVariant>
 #include <QNetworkAccessManager>
+#include <QTimer>
 
 namespace bb {
     namespace cascades {
@@ -81,6 +82,9 @@ signals:
     // servis veritabanını güncelleyince olması gereken yenileme
     // main.qml burayı dinlemede
     void dbUpdateTriggerChanged();
+    // New messages while the app shows as an Active Frame (cover.qml):
+    // at most one every 3 s, without reloading the chat lists.
+    void coverRefreshNeeded();
     void updateCheckCompleted(bool updateRequired, QString latestVersion, QString releaseNotes);
     void updateCheckFailed(QString errorMessage);
     // A tapped message notification: show this chat.
@@ -92,6 +96,7 @@ signals:
 private slots:
     void onSystemLanguageChanged();
     void onUIRefreshTriggered(const QString &path);
+    void onFullscreen();
     void onReplyFinished(QNetworkReply* reply);
     void onInvoked(const bb::system::InvokeRequest &request);
 private:
@@ -100,6 +105,9 @@ private:
     bb::system::InvokeManager* m_invokeManager;
     QFileSystemWatcher* m_uiWatcher;
     int m_dbUpdateTrigger;
+    // A refresh that arrived while the app was not in full screen.
+    bool m_refreshPending;
+    QTimer m_coverTimer;
     QSettings m_settings;
     QNetworkAccessManager* m_networkManager;
     bool m_qmlReadyForChats;

@@ -57,7 +57,10 @@ void CallClient::connectToService()
     // The service's socket (CallService::socketPath): same app, same data
     // folder. Asynchronous: never blocks the UI thread (startup included).
     m_socket->connectToServer(QDir::homePath() + "/callctl.sock");
-    if (!m_retry.isActive()) m_retry.start();
+    // A local socket usually connects inside connectToServer(), connected()
+    // included: restarting the retry after that kept it firing every 2 s
+    // for as long as the app was open (28 wake-ups a minute when minimized).
+    if (m_socket->state() != QLocalSocket::ConnectedState && !m_retry.isActive()) m_retry.start();
 }
 
 void CallClient::onDisconnected()

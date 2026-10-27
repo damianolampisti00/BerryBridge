@@ -99,6 +99,7 @@ Container {
     onCreationCompleted: {
         refresh();
         app.dbUpdateTriggerChanged.connect(cover.refresh);
+        app.coverRefreshNeeded.connect(cover.refresh);
         app.darkThemeChanged.connect(cover.refresh);
         dat.dataRefreshRequested.connect(cover.refresh);
         Application.thumbnail.connect(cover.refresh);
