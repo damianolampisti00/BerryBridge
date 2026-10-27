@@ -4,18 +4,26 @@
 
 ## 🍴 About this fork
 
-This is a fork of [adem-zengin/BerryBridge](https://github.com/adem-zengin/BerryBridge) with a few additions. It installs as a separate app (**Berry Bridge**, package `it.berrybridge.app`, data in `shared/misc/BerryBridge`), so it can sit next to the original; uninstall the original once this one works, or you will get every notification twice.
+This is a fork of [adem-zengin/BerryBridge](https://github.com/adem-zengin/BerryBridge) with a few additions. It installs as a separate app (**Berry Bridge**, package `it.berrybridge.app`, downloaded media in `shared/misc/BerryBridge`), so it can sit next to the original; uninstall the original once this one works, or you will get every notification twice.
+
+It follows the original up to **1.2.4** (new compose page with the account's contacts and the phone's, emoji packs, reply gesture, avatar preview in the chat list, chat title bar with the avatar, *Accounts* page split from *Settings*, BlackBerry Classic trackpad option).
+
+**Install**: download the `.bar` from [Releases](https://github.com/damianolampisti00/BerryBridge/releases). It is not signed by BlackBerry, so it needs a rooted phone (`tools/installbar.sh` over SSH, as `package.ps1 -Install` does) or a sideloading tool such as DBBT.
 
 What it adds:
 
+- **Your messages stay on the server**: chats, messages, avatars and contacts live in a cache in the app's private folder, filled from Beeper Desktop when the app opens (the chat list in a few seconds, messages page by page as you scroll) and deleted when it closes. The original keeps them in `shared/misc`, which other apps can read. With the app closed, the service still shows notifications, asking Beeper for the chat's name.
+- **Battery**: no reconnect loop on the push link (the original opened a new TLS connection every few seconds), no wake-ups while the app is minimized, and new messages don't reload the chat lists until you come back to the app.
+- **Network trouble**: a service that loses its network (the memory cap of headless apps, a DNS server left over from another Wi-Fi) restarts itself and reconnects. TLS certificates are verified (except for servers on the local network).
+
 - **Notifications with Instant Preview**, and tapping one opens that chat (the original does this too since 1.2.3). Here it also works for chats further down than the part of the list loaded so far (they are looked up in the database), switches to the account's tab without rebuilding the tabs, leaves an already open chat alone, and waits until the app is ready when the tap starts it.
 - **Profile pictures** for direct and group chats, fetched through Beeper Desktop's `/v1/assets/serve` and cached as small thumbnails. This also fixes the stored participant list of direct chats, which was unreadable (`JsonDataAccess::saveToBuffer` appends to the string it is given).
-- **Dark theme**: the original has a dark mode too since 1.2.3; this one predates it and works differently. It switches right away without restarting the app (**Settings > Dark theme**, on by default), and all pages (chats, chat list, contacts, emoji, search, Active Frame) take their colors from one WhatsApp-like palette. The light theme keeps the original colors.
+- **Dark theme**: the original has a dark mode too since 1.2.3; this one predates it and works differently. It switches right away without restarting the app (**Settings > Dark Mode**, on by default), and all pages (chats, chat list, contacts, emoji, search, Active Frame) take their colors from one WhatsApp-like palette. The light theme uses the original's colors.
 - **Voice messages without BerryCore**: received voice notes play inside the chat (Ogg/Opus decoded on the phone), and you can record and send your own (with an empty text field the send button becomes a microphone). Recording uses the phone's voice-recording audio path with the driver's mmap mode off, which removes the crackling it otherwise produces.
 - **WhatsApp voice calls** (experimental, see [below](#-whatsapp-calls-experimental)): incoming and outgoing 1:1 calls with a call screen, through a WaCalls server.
 - **Active Frame**: the minimized app shows each account with its unread messages (archived chats left out, muted ones counted and said).
 - **Safer settings**: the sync cursor and the new-message flags, which the app and its service both rewrite all the time, moved out of the main settings file; sharing it could empty it (server, token and accounts lost).
-- **`package.ps1`**: builds the app and its service from the command line into one `.bar`, and can install it on a rooted phone over SSH (`-Install`; set `$PhoneIp`/`$RootKey` in `package.config.ps1`, see `package.config.example.ps1`). It needs the BlackBerry 10 Native SDK 10.3 in `C:bndk` and Git for Windows.
+- **`package.ps1`**: builds the app and its service from the command line into one `.bar`, and can install it on a rooted phone over SSH (`-Install`; set `$PhoneIp`/`$RootKey` in `package.config.ps1`, see `package.config.example.ps1`). It needs the BlackBerry 10 Native SDK 10.3 in `C:\bbndk` and Git for Windows.
 
 ## 📞 WhatsApp calls (experimental)
 
@@ -26,15 +34,15 @@ WhatsApp <-> WaCalls (linked device of your account) <-> gateway (wss, token) <-
 ```
 
 - **Incoming calls**: like a phone call, the screen turns on and a system dialog with *Rispondi* / *Rifiuta* shows up, also on the lock screen (the password prompt appears with it if the phone is locked with one). Sound and vibration follow the active profile and Berry Bridge's notification settings (Settings > Notifications). The call screen comes to the front, plus a Hub notification (and a missed-call one if you don't answer). The call also rings on your main phone, as on any linked device.
-- **Outgoing calls**: *Chiama* in the title bar of WhatsApp one-to-one chats (the number comes from Beeper's participant list).
+- **Outgoing calls**: the ☎ button in the title bar of WhatsApp one-to-one chats (the number comes from Beeper's participant list).
 - **In a call**: timer, mute, speaker/earpiece, hang up. The call lives in the headless service, so hiding the screen or closing the app doesn't end it. A quiet "Chiamata WhatsApp in corso" notification in the Hub brings the call screen back.
-- **Audio**: 16 kHz mono, 20 ms blocks, the system's voice audio path. Playback goes through a 120 ms jitter buffer that refills after every pause (no packets come while the peer is silent), so network jitter doesn't chop the speech. Each mic block carries the phone's playback position, so the gateway can cancel the phone's own earpiece/speaker echo; it also cancels the user's voice coming back from a hands-free peer, and levels both voices. About 10% CPU on a Q10. The certificate of the gateway is verified.
+- **Audio**: 16 kHz mono, 20 ms blocks, the system's voice audio path. Playback goes through a jitter buffer that sizes itself to how late packets arrive (80-480 ms) and refills after every pause (no packets come while the peer is silent), so network jitter doesn't chop the speech; the gateway buffers the phone's audio the same way. Each mic block carries the speaker position it was recorded against (counted, not timed), so the gateway can cancel the phone's own earpiece/speaker echo; it also cancels the user's voice coming back from a hands-free peer, and levels both voices. About 10% CPU on a Q10. The certificate of the gateway is verified.
 
 Setup:
 
 1. Run [the WaCalls fork](https://github.com/damianolampisti00/WaCalls) with the gateway on its own listener and a random token (16+ characters) in a file, e.g. `wacalls -addr 127.0.0.1:8097 -bb-addr 127.0.0.1:8098 -bb-token-file bb_token`, and pair it with your WhatsApp (QR, *Linked devices*). Keep the WaCalls API itself on localhost: it has no authentication.
 2. Expose only the gateway, over HTTPS (for example a Cloudflare tunnel to `localhost:8098`; HTTP/2 transport is the safer choice for a long-lived audio stream).
-3. In Berry Bridge **Settings**: *Calls server* `wss://your-host/ws` and *Calls token*. The status line below them shows the link state.
+3. In Berry Bridge **Settings** (menu > Settings): *Calls server* `wss://your-host/ws` and *Calls token*. The status line below them shows the link state.
 
 Not done yet: video calls, group calls.
 
