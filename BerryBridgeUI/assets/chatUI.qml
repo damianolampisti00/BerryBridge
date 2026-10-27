@@ -912,7 +912,7 @@ Page {
                             
                             // 2. ORTA İÇERİK: Asıl tarih balonumuz
                             Container {
-                                background: Color.create(app.colors.panel)
+                                background: Color.create(Qt.app.colors.panel)
                                 leftPadding: ui.du(2.5)
                                 rightPadding: ui.du(2.5)
                                 topPadding: ui.du(0.8)
@@ -922,7 +922,7 @@ Page {
                                     text: ListItemData.headerText
                                     textStyle.fontSize: FontSize.XSmall
                                     textStyle.fontWeight: FontWeight.W500
-                                    textStyle.color: Color.create(app.colors.sender)
+                                    textStyle.color: Color.create(Qt.app.colors.sender)
                                     // Metin çok uzunsa kendi içinde de ortalansın
                                     horizontalAlignment: HorizontalAlignment.Center
                                 }
@@ -1242,7 +1242,7 @@ Page {
                                     }
                                     
                                     Container {
-                                        background: ListItemData.isSender ? Color.create(rootMessageItem.listView.rootPage.bubbleColor) : Color.create(app.colors.incoming)
+                                        background: ListItemData.isSender ? Color.create(rootMessageItem.listView.rootPage.bubbleColor) : Color.create(Qt.app.colors.incoming)
                                         leftPadding: ui.du(1.5); rightPadding: ui.du(1.5); topPadding: ui.du(1.0); bottomPadding: ui.du(1.0)
                                         layout: StackLayout {
                                         }
@@ -1261,7 +1261,7 @@ Page {
                                         Container {
                                             id: mentionCont
                                             visible: ListItemData.hasMention                                   
-                                            background: ListItemData.isSender ? Color.create(rootMessageItem.listView.rootPage.darkenColor(rootMessageItem.listView.rootPage.bubbleColor,15)): Color.create(app.colors.quote)
+                                            background: ListItemData.isSender ? Color.create(rootMessageItem.listView.rootPage.darkenColor(rootMessageItem.listView.rootPage.bubbleColor,15)): Color.create(Qt.app.colors.quote)
                                             bottomMargin: ui.du(1.0)
                                             layout: StackLayout { orientation: LayoutOrientation.LeftToRight}
                                             Container {
@@ -1339,7 +1339,7 @@ Page {
                                             property real contWidth: ListItemData.text===""?rootMessageItem.listView.displayWidth*0.5:rootMessageItem.listView.displayWidth*0.7
                                             property real contHeight: contWidth*ratio
                                             visible: (ListItemData.type && ListItemData.type === "IMAGE")
-                                            background: ListItemData.isSender ? Color.create(rootMessageItem.listView.rootPage.darkenColor(rootMessageItem.listView.rootPage.bubbleColor,15)): Color.create(app.colors.quote)
+                                            background: ListItemData.isSender ? Color.create(rootMessageItem.listView.rootPage.darkenColor(rootMessageItem.listView.rootPage.bubbleColor,15)): Color.create(Qt.app.colors.quote)
                                             preferredWidth: ListItemData.size ? contWidth : rootMessageItem.listView.displayWidth * 0.5
                                             preferredHeight: {if(ListItemData.localImagePath === undefined || ListItemData.localImagePath === "") {if (ratio>1.25){return contWidth*1.25} else{return contHeight} }
                                             else {if (ratio>1.25) return contWidth*1.25
@@ -1374,7 +1374,7 @@ Page {
                                                     minHeight: ui.du(10.0)
                                                     preferredWidth: ui.du(10.0)
                                                     preferredHeight: ui.du(10.0)                                   
-                                                    filterColor: Color.create(app.colors.muted)
+                                                    filterColor: Color.create(Qt.app.colors.muted)
                                                     horizontalAlignment: HorizontalAlignment.Right
                                                     verticalAlignment: VerticalAlignment.Top
                                                 }
@@ -1398,7 +1398,7 @@ Page {
                                                         text:ListItemData.fileSizeStr
                                                         textStyle.fontSize: FontSize.Medium
                                                         horizontalAlignment: HorizontalAlignment.Center
-                                                        textStyle.color: Color.create(app.colors.muted)
+                                                        textStyle.color: Color.create(Qt.app.colors.muted)
                                                         topMargin: 0
                                                     }
                                                 }                
@@ -1437,7 +1437,7 @@ Page {
                                             id:audioVideoCont
                                             property string upperType: ListItemData.type ? ListItemData.type.toString().toUpperCase() : ""
                                             visible: (upperType === "AUDIO" || upperType ==="VOICE" || upperType ==="VIDEO")
-                                            background: ListItemData.isSender ? Color.create(rootMessageItem.listView.rootPage.darkenColor(rootMessageItem.listView.rootPage.bubbleColor,15)): Color.create(app.colors.quote)
+                                            background: ListItemData.isSender ? Color.create(rootMessageItem.listView.rootPage.darkenColor(rootMessageItem.listView.rootPage.bubbleColor,15)): Color.create(Qt.app.colors.quote)
                                             preferredWidth:ListItemData.text===""?undefined:rootMessageItem.listView.displayWidth*0.7
                                             
                                             
@@ -1480,7 +1480,7 @@ Page {
                                                     preferredHeight: ui.du(9.0)                                   
                                                     horizontalAlignment: HorizontalAlignment.Left
                                                     verticalAlignment: VerticalAlignment.Center
-                                                    filterColor: upperType === "AUDIO" || upperType ==="VOICE" ? Color.create(app.colors.audio):Color.Red
+                                                    filterColor: upperType === "AUDIO" || upperType ==="VOICE" ? Color.create(Qt.app.colors.audio):Color.Red
                                                     rightMargin: ui.du(1.5)
                                                 }
                                                 
@@ -1516,7 +1516,7 @@ Page {
                                                         Label {
                                                             text:ListItemData.extension ? ListItemData.fileSizeStr+" • "+ListItemData.extension.substring(1).toUpperCase():""
                                                             textStyle.fontSize: FontSize.XSmall
-                                                            textStyle.color: Color.create(app.colors.muted)                                        
+                                                            textStyle.color: Color.create(Qt.app.colors.muted)                                        
                                                             topMargin: 0
                                                         }
                                                     }
@@ -1562,7 +1562,7 @@ Page {
                                             id:fileCont
                                             property string upperType: ListItemData.type ? ListItemData.type.toString().toUpperCase() : ""
                                             visible: (upperType === "FILE")
-                                            background: ListItemData.isSender ? Color.create(rootMessageItem.listView.rootPage.darkenColor(rootMessageItem.listView.rootPage.bubbleColor,15)): Color.create(app.colors.quote)
+                                            background: ListItemData.isSender ? Color.create(rootMessageItem.listView.rootPage.darkenColor(rootMessageItem.listView.rootPage.bubbleColor,15)): Color.create(Qt.app.colors.quote)
                                             preferredWidth:ListItemData.text===""?undefined:rootMessageItem.listView.displayWidth*0.7
                                             
                                             
@@ -1641,7 +1641,7 @@ Page {
                                                         Label {
                                                             text:ListItemData.extension ? ListItemData.fileSizeStr+" • "+ListItemData.extension.substring(1).toUpperCase():""
                                                             textStyle.fontSize: FontSize.XSmall
-                                                            textStyle.color: Color.create(app.colors.muted)                                        
+                                                            textStyle.color: Color.create(Qt.app.colors.muted)                                        
                                                             topMargin: 0
                                                         }
                                                     }
@@ -1691,7 +1691,7 @@ Page {
                                                 textStyle.fontSize: ListItemData.text.replace(/<[^>]*>/g, '').length < 3 ? FontSize.XLarge : FontSize.Medium;                                                textFormat: TextFormat.Html
                                                 topMargin: 0;
                                                 bottomMargin: 0;
-                                                textStyle.color: Color.create(app.colors.text)
+                                                textStyle.color: Color.create(Qt.app.colors.text)
                                             
                                             }
                                         }
@@ -1725,7 +1725,7 @@ Page {
 Label {
     text: ListItemData.reactionsText ? ListItemData.reactionsText : ""
     textStyle.fontSize: FontSize.XSmall
-    textStyle.color: Color.create(app.colors.muted)
+    textStyle.color: Color.create(Qt.app.colors.muted)
     horizontalAlignment: HorizontalAlignment.Left
     
     visible: ListItemData.reactionsText && ListItemData.reactionsText !== ""
@@ -1740,7 +1740,7 @@ Label {
             return ListItemData.timestamp+" ✔";}
     textFormat: TextFormat.Html                                 
     textStyle.fontSize: FontSize.XSmall
-    textStyle.color: Color.create(app.colors.muted)
+    textStyle.color: Color.create(Qt.app.colors.muted)
     horizontalAlignment: HorizontalAlignment.Right
 }
 
@@ -2346,7 +2346,7 @@ Label {
                                 verticalAlignment: VerticalAlignment.Fill
                                 
                                 // YENİ EKLENEN KISIM: Seçili olma veya basılma durumuna göre arka plan rengi
-                                background: ListItem.selected || ListItem.active ? Color.create(app.colors.selection) : Color.Transparent
+                                background: ListItem.selected || ListItem.active ? Color.create(Qt.app.colors.selection) : Color.Transparent
                                 
                                 Label {
                                     text: ListItemData.emoji
