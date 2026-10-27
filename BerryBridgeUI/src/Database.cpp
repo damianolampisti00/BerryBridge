@@ -1,4 +1,5 @@
 #include "../../BerryBridgeUIService/src/tlspolicy.hpp"
+#include "../../BerryBridgeUIService/src/cachepaths.hpp"
 #include <resolv.h>
 #include "Database.hpp"
 #include <QDir>
@@ -52,6 +53,7 @@ Database::Database(QObject *parent) : QObject(parent)
     QSslConfiguration::setDefaultConfiguration(sslConfig);
 
     m_initRun = m_settings.value("initRun", false).toBool();
+    m_cacheRetries = 0;
     m_netManager = new QNetworkAccessManager(this);
     connect(m_netManager, SIGNAL(finished(QNetworkReply*)), this, SLOT(onAnyReplyFinished(QNetworkReply*)));
 
@@ -84,6 +86,103 @@ Database::Database(QObject *parent) : QObject(parent)
     initContext();
     m_url = m_settings.value("serverUrl").toString();
     m_accessToken = m_settings.value("accessToken").toString();
+    // Set up already: the cache was deleted when the app last closed.
+    if (m_initRun) QTimer::singleShot(0, this, SLOT(rebuildCache()));
+}
+
+void Database::rebuildCache()
+{
+    if (m_url.isEmpty() || m_accessToken.isEmpty()) return;
+    qDebug() << "[CACHE] filling the chat list from Beeper";
+    initContext();
+    syncChats("", "CACHE_FILL");
+}
+
+void Database::retryCacheFill()
+{
+    if (m_url.isEmpty() || m_accessToken.isEmpty()) return;
+    syncChats(m_cacheRetryCursor, "CACHE_FILL");
+}
+
+void Database::touchRefresh()
+{
+    QFile refreshFile(bbCachePath("ui_refresh_trigger.txt"));
+    if (refreshFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        refreshFile.write(QByteArray::number(QDateTime::currentMSecsSinceEpoch()));
+        refreshFile.close();
+    }
+}
+
+// One chat row from a chat object of Beeper's API (the list has the same
+// fields as /v1/chats/{id}, plus the last message as "preview").
+void Database::upsertChatRow(const QVariantMap &rawChat)
+{
+    const QString chatId = rawChat.value("id").toString();
+    if (chatId.isEmpty()) return;
+    QSqlDatabase chatDb = QSqlDatabase::database("chats_db_conn");
+    if (!chatDb.isOpen()) return;
+    bb::data::JsonDataAccess jda;
+    QString participants, capabilities, preview; // saveToBuffer APPENDS: start empty
+    if (!rawChat.value("participants").isNull()) jda.saveToBuffer(rawChat.value("participants"), &participants);
+    if (participants.isEmpty()) participants = "[]";
+    if (!rawChat.value("capabilities").isNull()) jda.saveToBuffer(rawChat.value("capabilities"), &capabilities);
+    if (capabilities.isEmpty()) capabilities = "{}";
+    const QVariantMap p = rawChat.value("preview").toMap();
+    if (!p.isEmpty()) {
+        QVariantMap pv;
+        pv["type"] = p.value("type", "TEXT");
+        pv["isSender"] = p.value("isSender").toBool();
+        pv["senderName"] = p.value("senderName").toString();
+        pv["text"] = p.value("text").toString();
+        pv["timestamp"] = p.value("timestamp").toString();
+        jda.saveToBuffer(pv, &preview);
+    }
+    QSqlQuery q(chatDb);
+    q.prepare("INSERT OR REPLACE INTO chats ("
+              "id, localChatID, accountID, network, title, description, imgURL, type, "
+              "isReadOnly, lastActivity, unreadCount, unreadMentionsCount, "
+              "lastReadMessageSortKey, draft, reminder, snooze, "
+              "isArchived, isMarkedUnread, isMuted, isPinned, isLowPriority, "
+              "messageExpirySeconds, participants_json, capabilities_json, preview_json) "
+              "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    q.addBindValue(chatId);
+    q.addBindValue(rawChat.value("localChatID").toString());
+    q.addBindValue(rawChat.value("accountID").toString());
+    q.addBindValue(rawChat.value("network").toString());
+    q.addBindValue(rawChat.value("title").toString());
+    q.addBindValue(rawChat.value("description").toString());
+    q.addBindValue(rawChat.value("imgURL"));
+    q.addBindValue(rawChat.value("type").toString());
+    q.addBindValue(rawChat.value("isReadOnly").toBool() ? 1 : 0);
+    q.addBindValue(rawChat.value("lastActivity").toString());
+    q.addBindValue(rawChat.value("unreadCount").toInt());
+    q.addBindValue(rawChat.value("unreadMentionsCount").toInt());
+    q.addBindValue(rawChat.value("lastReadMessageSortKey").toString());
+    q.addBindValue(rawChat.value("draft").isNull() ? QString() : rawChat.value("draft").toString());
+    q.addBindValue(rawChat.value("reminder").isNull() ? QString() : rawChat.value("reminder").toString());
+    q.addBindValue(rawChat.value("snooze").isNull() ? QString() : rawChat.value("snooze").toString());
+    q.addBindValue(rawChat.value("isArchived").toBool() ? 1 : 0);
+    q.addBindValue(rawChat.value("isMarkedUnread").toBool() ? 1 : 0);
+    q.addBindValue(rawChat.value("isMuted").toBool() ? 1 : 0);
+    q.addBindValue(rawChat.value("isPinned").toBool() ? 1 : 0);
+    q.addBindValue(rawChat.value("isLowPriority").toBool() ? 1 : 0);
+    q.addBindValue(rawChat.value("messageExpirySeconds").isNull() ? 0 : rawChat.value("messageExpirySeconds").toInt());
+    q.addBindValue(participants);
+    q.addBindValue(capabilities);
+    q.addBindValue(preview.isEmpty() ? QVariant(QVariant::String) : QVariant(preview));
+    if (!q.exec()) qWarning() << "[CACHE] chat row:" << q.lastError().text();
+}
+
+// The next page of a chat's messages from Beeper, newest first: the first
+// time a chat is shown, and each time the list scrolls past what's cached.
+void Database::fetchChatPage(const QString &chatId)
+{
+    if (chatId.isEmpty() || m_msgFetching.contains(chatId)) return;
+    const QString cursor = m_chatCursor.value(chatId);
+    if (cursor == "END") return;
+    m_msgFetching.insert(chatId);
+    fetchInitialMessages(chatId, cursor);
+    if (m_initialSyncReply) m_initialSyncReply->setProperty("lazy", true);
 }
 
 // REST Isteklerinde olusan SSL hatalarini otomatik bastiran slot
@@ -532,6 +631,7 @@ void Database::syncChats(const QString &cursor, QString callbackAction) {
 
     m_chatsReply = m_netManager->get(request);
     m_chatsReply->setProperty("callbackAction", callbackAction);
+    m_chatsReply->setProperty("cursor", cursor);
 
     connect(m_chatsReply, SIGNAL(finished()), this, SLOT(onChatsFetched()));
 
@@ -542,18 +642,31 @@ void Database::onChatsFetched() {
     if (!m_chatsReply) return;
 
     QString callback = m_chatsReply->property("callbackAction").toString();
+    const QString pageCursor = m_chatsReply->property("cursor").toString();
+    const QNetworkReply::NetworkError netError = m_chatsReply->error();
+    const QString netErrorText = m_chatsReply->errorString();
     QByteArray responseData = m_chatsReply->readAll();
 
     m_chatsReply->deleteLater();
     m_chatsReply = 0;
 
     bb::data::JsonDataAccess jda;
-    QVariantMap root = jda.loadFromBuffer(responseData).toMap();
+    QVariantMap root;
+    if (netError == QNetworkReply::NoError) root = jda.loadFromBuffer(responseData).toMap();
 
-    if (jda.hasError()) {
-        qWarning() << "[DATABASE] JSON Parse Error in onChatsFetched";
+    if (netError != QNetworkReply::NoError || jda.hasError()) {
+        if (netError != QNetworkReply::NoError) qWarning() << "[DATABASE] chat list request failed:" << netErrorText;
+        else qWarning() << "[DATABASE] JSON Parse Error in onChatsFetched";
+        if (callback == "CACHE_FILL" && m_cacheRetries < 8) {
+            const int delay = qMin(60000, 5000 << m_cacheRetries);
+            ++m_cacheRetries;
+            m_cacheRetryCursor = pageCursor;
+            qWarning() << "[CACHE] chat list page failed - retry" << m_cacheRetries << "in" << delay / 1000 << "s";
+            QTimer::singleShot(delay, this, SLOT(retryCacheFill()));
+        }
         return;
     }
+    if (callback == "CACHE_FILL") m_cacheRetries = 0;
 
     QVariantList items = root["items"].toList();
     bool hasMore = root["hasMore"].toBool();
@@ -577,6 +690,7 @@ void Database::onChatsFetched() {
             }
 
             QString chatId = chat["id"].toString();
+            if (callback == "CACHE_FILL") upsertChatRow(chat);
             if (!chatId.isEmpty()) {
                 QVariantMap chatNode;
                 chatNode["chatId"] = chatId;
@@ -587,9 +701,14 @@ void Database::onChatsFetched() {
     }
 
     // --- PAGINATION & CALLBACK KARARLARI ---
+    if (callback == "CACHE_FILL") emit dataRefreshRequested(); // the list fills page by page
     if (hasMore && !oldestCursor.isEmpty() && !items.isEmpty()) {
         // Sonraki sayfayı iste (Kuyruk birikmeye devam eder)
         syncChats(oldestCursor, callback);
+    } else if (callback == "CACHE_FILL") {
+        qDebug() << "[CACHE] chat list complete:" << m_syncChatQueue.size() << "chats";
+        m_syncChatQueue.clear();
+        if (!m_initRun) finishDatabaseSync(); // first setup done
     } else {
         // Tüm sayfalar bitti, kuyruk tamamen doldu. İşlemi başlatabiliriz.
         qDebug() << "[DATABASE] Tum sayfalama tamamlandi. Toplam Kuyruk Boyutu:" << m_syncChatQueue.size();
@@ -632,7 +751,7 @@ void Database::initializeDatabaseSync() {
     QSqlDatabase::removeDatabase("messages_db_conn");
     QSqlDatabase::removeDatabase("chats_db_conn");
 
-    QDir sharedDir("/accounts/1000/shared/misc/BerryBridge");
+    QDir sharedDir(bbCacheDir());
     if (sharedDir.exists()) {
         QStringList filters;
         filters << "*.db" << "*.db-shm" << "*.db-wal";
@@ -671,7 +790,7 @@ void Database::initializeDatabaseSync() {
     qDebug() << "[DATABASE] Tablolar sıfırlandı ve yeniden oluşturuldu.";
 
     emit syncProgress("Fetching all chats from Beeper...", chatPercent);
-    syncChats("", "PREPARE_QUEUE");
+    syncChats("", "CACHE_FILL"); // the chat list; messages come per chat when opened
 }
 
 void Database::prepareMessageSyncQueue() {
@@ -739,8 +858,10 @@ void Database::onInitialMessagesFetched() {
     reply->deleteLater();
     if (reply == m_initialSyncReply) m_initialSyncReply = 0;
 
+    const bool lazy = reply->property("lazy").toBool();
     if (httpStatus != 200) {
         qWarning() << "[DATABASE] Error fetching messages for" << chatId << "HTTP:" << httpStatus;
+        if (lazy) { m_msgFetching.remove(chatId); return; }
         processNextChatFromQueue();
         return;
     }
@@ -832,6 +953,12 @@ void Database::onInitialMessagesFetched() {
     bool hasMore = root["hasMore"].toBool();
     QString oldestCursor = root["oldestCursor"].toString();
 
+    if (lazy) { // one page: the next comes when the chat scrolls there
+        m_msgFetching.remove(chatId);
+        m_chatCursor.insert(chatId, (hasMore && !oldestCursor.isEmpty() && oldestCursor != "null") ? oldestCursor : QString("END"));
+        touchRefresh();
+        return;
+    }
     if (hasMore && !oldestCursor.isEmpty() && oldestCursor != "null") {
         fetchInitialMessages(chatId, oldestCursor);
     } else {
@@ -1147,7 +1274,7 @@ void Database::markChatAsRead(const QString &accountID, const QString &chatID) {
     if (changed) {
         emit dataRefreshRequested();
 
-        QFile refreshFile("/accounts/1000/shared/misc/BerryBridge/ui_refresh_trigger.txt");
+        QFile refreshFile(bbCachePath("ui_refresh_trigger.txt"));
         if (refreshFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
             refreshFile.write(QByteArray::number(QDateTime::currentMSecsSinceEpoch()));
             refreshFile.close();
@@ -1202,7 +1329,7 @@ void Database::markChatAsUnread(const QString &accountID, const QString &chatID)
     if (changed) {
         emit dataRefreshRequested();
 
-        QFile refreshFile("/accounts/1000/shared/misc/BerryBridge/ui_refresh_trigger.txt");
+        QFile refreshFile(bbCachePath("ui_refresh_trigger.txt"));
         if (refreshFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
             refreshFile.write(QByteArray::number(QDateTime::currentMSecsSinceEpoch()));
             refreshFile.close();
@@ -1670,6 +1797,9 @@ QVariantList Database::getMessagesForChat(const QString &accountID, const QStrin
         qWarning() << "[DATABASE] getMessages query failed:" << query.lastError().text();
     }
 
+    // Fewer than asked for: the next older page from Beeper (the chat page
+    // reloads through the refresh file when it's in).
+    if (messages.size() < limit) fetchChatPage(chatID);
     return messages;
 }
 
@@ -1735,7 +1865,7 @@ void Database::downloadAttachment(const QString &mxcUrl, const QString &messageI
 // through /v1/assets/serve (or straight to http(s)/data: URLs), shrunk to a
 // small square thumbnail and cached on the phone, one file per source URL.
 
-static const char *const kAvatarDir = "/accounts/1000/shared/misc/BerryBridge/avatars";
+static QString avatarDir() { return bbCachePath("avatars"); }
 static const int kAvatarParallel = 3;
 static const int kAvatarSide = 160; // px: the list shows ~12du, ~120px on a Q10
 
@@ -1766,7 +1896,7 @@ QString Database::avatarSourceFor(const QString &chatType, const QString &imgURL
 
 QString Database::avatarCachePath(const QString &src)
 {
-    return QString(kAvatarDir) + "/"
+    return avatarDir() + "/"
             + QString::fromLatin1(QCryptographicHash::hash(src.toUtf8(), QCryptographicHash::Md5).toHex())
             + ".png";
 }
@@ -1839,7 +1969,7 @@ void Database::saveAvatar(const QString &src, const QByteArray &data)
     // memory in a long list, and the row only shows a circle of ~12du anyway.
     QImage thumb = image.scaled(kAvatarSide, kAvatarSide, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
     thumb = thumb.copy((thumb.width() - kAvatarSide) / 2, (thumb.height() - kAvatarSide) / 2, kAvatarSide, kAvatarSide);
-    QDir().mkpath(kAvatarDir);
+    QDir().mkpath(avatarDir());
     if (!thumb.save(avatarCachePath(src), "PNG")) {
         m_avatarFailed.insert(src);
         return;
@@ -2067,7 +2197,7 @@ void Database::markAllChatsAsRead(const QString &accountID) {
         emit dataRefreshRequested();
 
         // UI tetikleyici dosya yazımı
-        QFile refreshFile("/accounts/1000/shared/misc/BerryBridge/ui_refresh_trigger.txt");
+        QFile refreshFile(bbCachePath("ui_refresh_trigger.txt"));
         if (refreshFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
             refreshFile.write(QByteArray::number(QDateTime::currentMSecsSinceEpoch()));
             refreshFile.close();
@@ -2302,6 +2432,7 @@ QVariantList Database::getDeviceContacts(const QString &userFilter) {
 
 // Database.cpp içinde
 bool Database::initContext() {
+    QDir().mkpath(bbCacheDir()); // the private cache folder (cachepaths.hpp)
     bool messagesSuccess = false;
     bool chatsSuccess = false;
 
@@ -2316,7 +2447,7 @@ bool Database::initContext() {
 
     {
         QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "messages_db_conn");
-        db.setDatabaseName("/accounts/1000/shared/misc/BerryBridge/messages.db");
+        db.setDatabaseName(bbCachePath("messages.db"));
         if (!db.open()) {
             qCritical() << "[CRITICAL] Messages dosyası acilamadi:" << db.lastError().text();
             return false;
@@ -2368,7 +2499,7 @@ bool Database::initContext() {
 
     {
         QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "chats_db_conn");
-        db.setDatabaseName("/accounts/1000/shared/misc/BerryBridge/chats.db");
+        db.setDatabaseName(bbCachePath("chats.db"));
         if (!db.open()) {
             qCritical() << "[CRITICAL] Chats dosyası acilamadi:" << db.lastError().text();
             return false;
@@ -2448,7 +2579,7 @@ Q_INVOKABLE void Database::setMute(const QString &chatID, bool value) {
 
             // 3. ADIM: Cross-process tetikleyici (Servis tarafı için)
             // Servis'in bu değişikliği algılayıp gerekirse bildirimleri susturması sağlanır.
-            QFile refreshFile("/accounts/1000/shared/misc/BerryBridge/ui_refresh_trigger.txt");
+            QFile refreshFile(bbCachePath("ui_refresh_trigger.txt"));
             if (refreshFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
                 refreshFile.write(QByteArray::number(QDateTime::currentMSecsSinceEpoch()));
                 refreshFile.close();
@@ -3264,7 +3395,7 @@ void Database::onRemoveReactionFinished() {
         }
 
         // UI Arayüzünü Tetikle
-        QFile refreshFile("/accounts/1000/shared/misc/BerryBridge/ui_refresh_trigger.txt");
+        QFile refreshFile(bbCachePath("ui_refresh_trigger.txt"));
         if (refreshFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
             refreshFile.write(QByteArray::number(QDateTime::currentMSecsSinceEpoch()));
             refreshFile.close();
@@ -3313,7 +3444,7 @@ void Database::deleteMessage(const QString &chatID, const QString &msgID, bool f
         }
 
         // UI Arayüzünü Tetikle
-        QFile refreshFile("/accounts/1000/shared/misc/BerryBridge/ui_refresh_trigger.txt");
+        QFile refreshFile(bbCachePath("ui_refresh_trigger.txt"));
         if (refreshFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
             refreshFile.write(QByteArray::number(QDateTime::currentMSecsSinceEpoch()));
             refreshFile.close();
@@ -3462,7 +3593,7 @@ void Database::deleteChat(const QString &chatID) {
     }
 
     // UI Arayüzünü Tetikle
-    QFile refreshFile("/accounts/1000/shared/misc/BerryBridge/ui_refresh_trigger.txt");
+    QFile refreshFile(bbCachePath("ui_refresh_trigger.txt"));
     if (refreshFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         refreshFile.write(QByteArray::number(QDateTime::currentMSecsSinceEpoch()));
         refreshFile.close();
@@ -3501,7 +3632,7 @@ Q_INVOKABLE void Database::setPin(const QString &chatID, bool value) {
 
             // 3. ADIM: Cross-process tetikleyici (Servis tarafı için)
             // Servis'in bu değişikliği algılayıp gerekirse bildirimleri susturması sağlanır.
-            QFile refreshFile("/accounts/1000/shared/misc/BerryBridge/ui_refresh_trigger.txt");
+            QFile refreshFile(bbCachePath("ui_refresh_trigger.txt"));
             if (refreshFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
                 refreshFile.write(QByteArray::number(QDateTime::currentMSecsSinceEpoch()));
                 refreshFile.close();
@@ -4053,7 +4184,7 @@ void Database::onSyncResponseReceived()
 
     if (newMessagesCounter > 0) {
         emit messagesUpdated();
-        QFile refreshFile("/accounts/1000/shared/misc/BerryBridge/ui_refresh_trigger.txt");
+        QFile refreshFile(bbCachePath("ui_refresh_trigger.txt"));
         if (refreshFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
             refreshFile.write(QByteArray::number(QDateTime::currentMSecsSinceEpoch()));
             refreshFile.close();

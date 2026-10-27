@@ -18,6 +18,7 @@
 #include "call/callaudiotest.hpp"
 #include "call/callservice.hpp"
 #include <QDir>
+#include <QFileInfo>
 
 // Volatile state written often by BOTH processes (sync cursor, new-content
 // flags) lives in its own file, never in the main settings (server, token,
@@ -43,6 +44,7 @@ static QString stateSettingsPath()
 #include <resolv.h>
 #include "freshresolver.hpp"
 #include "tlspolicy.hpp"
+#include "cachepaths.hpp"
 #include <new>
 
 #include "memoryguard.hpp"
@@ -66,6 +68,7 @@ Service::Service() :
         m_pushWatchdogTimer(new QTimer(this)),
         m_pushRefused(0),
         m_calls(0),
+        m_cacheActive(false),
         m_pushResolving(false),
         m_pushConnectTimer(new QTimer(this)),
         m_pushAttempt(0),
@@ -118,6 +121,23 @@ Service::Service() :
     // WhatsApp calls: the call service (gateway link, ringing, audio, UI socket).
     CallService *calls = new CallService(this);
     m_calls = calls;
+    connect(calls, SIGNAL(uiClientsChanged(int)), this, SLOT(onUiClients(int)));
+    // Left over from before a restart, with no app open to use it: delete it.
+    // (An open app reconnects within ~2 s.)
+    QTimer::singleShot(15000, this, SLOT(wipeIfNoUi()));
+    // What earlier versions kept in the SHARED folder (any app could read it):
+    // gone for good. Files sent in chats stay there.
+    {
+        const QString old = "/accounts/1000/shared/misc/BerryBridge/";
+        const char *files[] = {"messages.db", "messages.db-wal", "messages.db-shm", "chats.db", "chats.db-wal",
+                               "chats.db-shm", "ui_refresh_trigger.txt", 0};
+        for (int i = 0; files[i]; ++i) QFile::remove(old + files[i]);
+        QDir avatars(old + "avatars");
+        if (avatars.exists()) {
+            foreach (const QString &f, avatars.entryList(QDir::Files)) avatars.remove(f);
+            QDir().rmdir(old + "avatars");
+        }
+    }
 #ifdef BB_CALL_TEST
     // Developer builds only (package.ps1 -DevTools): the call-audio test
     // driven by calltest.json in the SHARED folder -- any app able to write
@@ -230,6 +250,7 @@ void Service::resumeSyncing()
 
 void Service::startSyncLoop()
 {
+    if (!m_cacheActive) return; // no cache to fill: onUiClients starts it with the app
 
     if(!m_initRun){
         QTimer::singleShot(30000, this, SLOT(startSyncLoop()));
@@ -271,6 +292,7 @@ void Service::startSyncLoop()
 
 void Service::performPeriodicSync()
 {
+    if (!m_cacheActive) return; // it only catches the cache up (cachepaths.hpp)
     if (m_netConfManager && !m_netConfManager->isOnline()) return;
 
     bool isPaginating = !m_nextCursor.isEmpty();
@@ -687,7 +709,7 @@ void Service::onSyncResponseReceived()
 
     if (newMessagesCounter > 0) {
         emit messagesUpdated();
-        QFile refreshFile("/accounts/1000/shared/misc/BerryBridge/ui_refresh_trigger.txt");
+        QFile refreshFile(bbCachePath("ui_refresh_trigger.txt"));
         if (refreshFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
             refreshFile.write(QByteArray::number(QDateTime::currentMSecsSinceEpoch()));
             refreshFile.close();
@@ -778,24 +800,10 @@ void Service::createMessageNotification(const QString& accountID, const QString&
     bool statusEnabled = settings.value("state_state_pref_status_" + accountID, false).toBool();
     bool channelsEnabled = settings.value("state_state_pref_channels_" + accountID, false).toBool();
 
-    QSqlDatabase chatDb = QSqlDatabase::database("chats_db_conn");
-
-    if (!chatDb.isOpen()) {
-        qCritical() << "[SERVICE] Kritik Hata: initDatabases çalıştırılmasına rağmen veritabanları açılamadı!";
-        return;
-    }
-
-    QSqlQuery selectOldChat(chatDb);
-    selectOldChat.prepare("SELECT type, title, isMuted  FROM chats WHERE id = ?");
-    selectOldChat.bindValue(0, chatID);
-    QString chatType = "";
-    QString chatTitle = "";
-    bool isChatMuted = false;
-    if (selectOldChat.exec() && selectOldChat.next()) {
-        chatType = selectOldChat.value(0).toString();
-        chatTitle = selectOldChat.value(1).toString();
-        isChatMuted = selectOldChat.value(2).toBool();
-    }
+    const QVariantMap meta = chatMeta(chatID); // the cache, or Beeper when the app is closed
+    QString chatType = meta.value("type").toString();
+    QString chatTitle = meta.value("title").toString();
+    bool isChatMuted = meta.value("isMuted").toBool();
     // Determine Filtering based on chatType
     bool shouldNotify = true;
 
@@ -883,6 +891,10 @@ void Service::sendStatusNotification(const QString &title, const QString &body)
 
 // Veritabanı bağlantılarını global/class seviyesinde bir kez açmalısın
 void Service::initDatabases() {
+    // Only while the app is open: otherwise there is no cache (cachepaths.hpp),
+    // and no path may create one behind the app's back.
+    if (!m_cacheActive) return;
+    QDir().mkpath(bbCacheDir());
     // 1. MESSAGES DATABASE
     if (QSqlDatabase::contains("messages_db_conn")) {
         {
@@ -894,7 +906,7 @@ void Service::initDatabases() {
 
     {
         QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "messages_db_conn");
-        db.setDatabaseName("/accounts/1000/shared/misc/BerryBridge/messages.db");
+        db.setDatabaseName(bbCachePath("messages.db"));
 
         if (db.open()) {
             QSqlQuery query(db);
@@ -950,7 +962,7 @@ void Service::initDatabases() {
 
     {
         QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "chats_db_conn");
-        db.setDatabaseName("/accounts/1000/shared/misc/BerryBridge/chats.db");
+        db.setDatabaseName(bbCachePath("chats.db"));
 
         if (db.open()) {
             QSqlQuery query(db);
@@ -1375,6 +1387,10 @@ void Service::handlePushEvent(const QByteArray &payload)
         QVariantMap pushMap = jda.loadFromBuffer(payload).toMap();
 
         if (jda.hasError()) return;
+        if (!m_cacheActive) { // the app is closed: no cache, just notifications
+            notifyWithoutCache(pushMap);
+            return;
+        }
 
 
         QString type = pushMap.value("type").toString();
@@ -1697,7 +1713,7 @@ void Service::handlePushEvent(const QByteArray &payload)
         emit messagesUpdated();
 
         // Dosyaya yazma işlemi sonlandırılıyor
-        QFile refreshFile("/accounts/1000/shared/misc/BerryBridge/ui_refresh_trigger.txt");
+        QFile refreshFile(bbCachePath("ui_refresh_trigger.txt"));
         if (refreshFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
             refreshFile.write(QByteArray::number(QDateTime::currentMSecsSinceEpoch()));
             refreshFile.close();
@@ -1999,7 +2015,7 @@ void Service::processChatAsync(const QString &msgId, const QString &chatId, cons
 
         if (chatDbUpdated) {
             qDebug() << "[SERVICE] Değişim işlendi - Chat:" << chatId << ", UI Refreshed!";
-            QFile refreshFile("/accounts/1000/shared/misc/BerryBridge/ui_refresh_trigger.txt");
+            QFile refreshFile(bbCachePath("ui_refresh_trigger.txt"));
             if (refreshFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
                 refreshFile.write(QByteArray::number(QDateTime::currentMSecsSinceEpoch()));
                 refreshFile.close();
@@ -2036,4 +2052,139 @@ QString Service::getTimestamp() {
 void Service::onAnyReplyFinished(QNetworkReply *reply)
 {
     if (reply && reply->error() == QNetworkReply::HostNotFoundError) res_init();
+}
+
+// --- the data cache's lifetime (cachepaths.hpp) ------------------------------
+
+static void removeTree(const QString &path)
+{
+    QDir dir(path);
+    if (!dir.exists()) return;
+    foreach (const QFileInfo &fi, dir.entryInfoList(QDir::NoDotAndDotDot | QDir::AllEntries | QDir::Hidden | QDir::System)) {
+        if (fi.isDir() && !fi.isSymLink()) removeTree(fi.absoluteFilePath());
+        else QFile::remove(fi.absoluteFilePath());
+    }
+    dir.rmdir(path);
+}
+
+void Service::closeDatabases()
+{
+    {
+        if (QSqlDatabase::contains("messages_db_conn")) QSqlDatabase::database("messages_db_conn").close();
+        if (QSqlDatabase::contains("chats_db_conn")) QSqlDatabase::database("chats_db_conn").close();
+    }
+    QSqlDatabase::removeDatabase("messages_db_conn");
+    QSqlDatabase::removeDatabase("chats_db_conn");
+}
+
+void Service::onUiClients(int count)
+{
+    const bool active = count > 0;
+    if (active == m_cacheActive) return;
+    m_cacheActive = active;
+    if (active) {
+        qDebug() << "[CACHE] the app is open: cache on";
+        QDir().mkpath(bbCacheDir());
+        // The app fills the cache from Beeper itself; the catch-up sync
+        // only has to look from now on.
+        const QString now = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
+        QSettings(stateSettingsPath(), QSettings::IniFormat).setValue("lastSyncTimestamp", now);
+        m_lastSyncTimestamp = now;
+        initDatabases();
+        startSyncLoop();
+    } else {
+        // Deleted in a moment, unless the app reconnects meanwhile (a dropped
+        // local socket, a restart of this service): files the app still has
+        // open must not vanish under it.
+        qDebug() << "[CACHE] the app closed: cache deleted in 10 s";
+        if (m_syncTimer) m_syncTimer->stop();
+        QTimer::singleShot(10000, this, SLOT(wipeIfNoUi()));
+    }
+}
+
+void Service::wipeIfNoUi()
+{
+    if (m_cacheActive) return;
+    qDebug() << "[CACHE] deleting the cache";
+    closeDatabases();
+    removeTree(bbCacheDir());
+}
+
+// A chat's type, title and mute flag for a notification: from the cache while
+// the app is open, otherwise from Beeper (kept in memory; a chat.upserted
+// event drops the entry, so a rename or a mute is picked up next time).
+QVariantMap Service::chatMeta(const QString &chatID)
+{
+    QVariantMap m;
+    if (m_cacheActive) {
+        QSqlDatabase chatDb = QSqlDatabase::database("chats_db_conn");
+        if (chatDb.isOpen()) {
+            QSqlQuery q(chatDb);
+            q.prepare("SELECT type, title, isMuted FROM chats WHERE id = ?");
+            q.bindValue(0, chatID);
+            if (q.exec() && q.next()) {
+                m["type"] = q.value(0).toString();
+                m["title"] = q.value(1).toString();
+                m["isMuted"] = q.value(2).toBool();
+                return m;
+            }
+        }
+    }
+    if (m_chatMeta.contains(chatID)) return m_chatMeta.value(chatID);
+    const QVariantMap raw = fetchChatMetadataSync(chatID);
+    if (raw.isEmpty()) return m;
+    m["type"] = raw.value("type").toString();
+    m["title"] = raw.value("title").toString();
+    m["isMuted"] = raw.value("isMuted").toBool();
+    if (m_chatMeta.size() > 300) m_chatMeta.clear(); // a few KB at most (memoryguard.hpp)
+    m_chatMeta.insert(chatID, m);
+    return m;
+}
+
+// The app is closed, there is no cache: a new message only becomes a Hub
+// notification. "New" can't be told from the database here, so: not ours, not
+// an edit, a deletion or a reaction, not seen in this run already, and recent.
+void Service::notifyWithoutCache(const QVariantMap &push)
+{
+    const QString type = push.value("type").toString();
+    if (type == "chat.upserted") {
+        m_chatMeta.remove(push.value("chatID").toString());
+        return;
+    }
+    if (type != "message.upserted") return;
+    const QDateTime now = QDateTime::currentDateTimeUtc();
+    foreach (const QVariant &v, push.value("entries").toList()) {
+        const QVariantMap e = v.toMap();
+        const QString id = e.value("id").toString();
+        if (id.isEmpty() || m_recentMsgIds.contains(id)) continue;
+        m_recentMsgIds << id;
+        if (m_recentMsgIds.size() > 300) m_recentMsgIds.removeFirst();
+        if (e.value("isSender").toBool() || e.value("isDeleted").toBool() || e.contains("editedTimestamp")) continue;
+        const QString msgType = e.value("type").toString();
+        if (msgType == "REACTION" || msgType == "NOTICE") continue;
+        QDateTime ts = QDateTime::fromString(e.value("timestamp").toString().left(19), Qt::ISODate);
+        ts.setTimeSpec(Qt::UTC);
+        if (ts.isValid() && ts.secsTo(now) > 300) continue; // an old message updated, not a new one
+
+        QString text = e.value("text").toString();
+        if (msgType != "TEXT") {
+            QString fileName;
+            const QVariantList att = e.value("attachments").toList();
+            if (!att.isEmpty()) fileName = att.at(0).toMap().value("fileName").toString();
+            if (msgType == "IMAGE") text = QString::fromUtf8("\xF0\x9F\x93\xB7 Photo ") + text;
+            else if (msgType == "VIDEO" || msgType == "VIDEO_MESSAGE") text = QString::fromUtf8("\xF0\x9F\x8E\xA5 Video ") + text;
+            else if (msgType.contains("AUDIO") || msgType.contains("VOICE")) text = QString::fromUtf8("\xF0\x9F\x94\x89 Audio ") + text;
+            else if (msgType == "FILE") text = QString::fromUtf8("\xF0\x9F\x93\x84  ") + fileName + (text.isEmpty() ? QString() : " : " + text);
+            else if (msgType == "LOCATION") text = QString::fromUtf8("\xF0\x9F\x93\x8D Location ") + text;
+            else if (msgType == "STICKER") text = QString::fromUtf8("\xF0\x9F\x8C\x9E Sticker ") + text;
+            else text = msgType + " " + text;
+        }
+        if (text.trimmed().isEmpty()) continue;
+        QMetaObject::invokeMethod(this, "createMessageNotification", Qt::QueuedConnection,
+                                  Q_ARG(QString, e.value("accountID").toString()),
+                                  Q_ARG(QString, e.value("chatID").toString()),
+                                  Q_ARG(QString, e.value("senderName").toString()),
+                                  Q_ARG(QString, msgType),
+                                  Q_ARG(QString, text));
+    }
 }

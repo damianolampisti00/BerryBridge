@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include "../../BerryBridgeUIService/src/cachepaths.hpp"
 #include "applicationui.hpp"
 #include "Database.hpp"
 #include "ScreenManager.hpp"
@@ -89,11 +90,11 @@ ApplicationUI::ApplicationUI() :
     }
 
     // Ensure directory and generic refresh file exist before watching
-    QDir dir("/accounts/1000/shared/misc/BerryBridge");
+    QDir dir(bbCacheDir());
     if (!dir.exists()) {
        dir.mkpath(".");
     }
-    QString refreshPath = "/accounts/1000/shared/misc/BerryBridge/ui_refresh_trigger.txt";
+    QString refreshPath = bbCachePath("ui_refresh_trigger.txt");
     QFile refreshFile(refreshPath);
     if (!refreshFile.exists()) {
        if (refreshFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
