@@ -22,6 +22,7 @@
 #include <QSettings>
 #include <QVariant>
 #include <QNetworkAccessManager>
+#include <QTimer>
 
 namespace bb {
     namespace cascades {
@@ -51,6 +52,10 @@ class ApplicationUI: public QObject
     // as in the original.
     Q_PROPERTY(bool darkTheme READ darkTheme WRITE setDarkTheme NOTIFY darkThemeChanged)
     Q_PROPERTY(QVariantMap colors READ colors NOTIFY darkThemeChanged)
+    Q_PROPERTY(bool disableTrackpadFocus READ disableTrackpadFocus WRITE setDisableTrackpadFocus NOTIFY disableTrackpadFocusChanged)
+    // The original's name for darkTheme (its QML reads app.darkMode).
+    Q_PROPERTY(bool darkMode READ darkTheme WRITE setDarkTheme NOTIFY darkThemeChanged)
+    Q_PROPERTY(bool isClassic READ isClassic CONSTANT)
 
 public:
     ApplicationUI();
@@ -71,6 +76,10 @@ public:
     Q_INVOKABLE void takePendingChat();
     // A chat was opened: its notification leaves the Hub.
     Q_INVOKABLE void dismissChatNotification(const QString &chatID);
+    bool disableTrackpadFocus() const;
+    Q_INVOKABLE void setDisableTrackpadFocus(bool disable);
+    Q_INVOKABLE void exitApp();
+    bool isClassic() const;
 
     bool darkTheme() const;
     void setDarkTheme(bool dark);
@@ -81,6 +90,9 @@ signals:
     // servis veritabanını güncelleyince olması gereken yenileme
     // main.qml burayı dinlemede
     void dbUpdateTriggerChanged();
+    // New messages while the app shows as an Active Frame (cover.qml):
+    // at most one every 3 s, without reloading the chat lists.
+    void coverRefreshNeeded();
     void updateCheckCompleted(bool updateRequired, QString latestVersion, QString releaseNotes);
     void updateCheckFailed(QString errorMessage);
     // A tapped message notification: show this chat.
@@ -88,10 +100,12 @@ signals:
     // Invoked by something other than a chat notification: show the call
     // screen if there is a call.
     void callScreenRequested();
+    void disableTrackpadFocusChanged(bool disable);
 
 private slots:
     void onSystemLanguageChanged();
     void onUIRefreshTriggered(const QString &path);
+    void onFullscreen();
     void onReplyFinished(QNetworkReply* reply);
     void onInvoked(const bb::system::InvokeRequest &request);
 private:
@@ -100,6 +114,9 @@ private:
     bb::system::InvokeManager* m_invokeManager;
     QFileSystemWatcher* m_uiWatcher;
     int m_dbUpdateTrigger;
+    // A refresh that arrived while the app was not in full screen.
+    bool m_refreshPending;
+    QTimer m_coverTimer;
     QSettings m_settings;
     QNetworkAccessManager* m_networkManager;
     bool m_qmlReadyForChats;
@@ -108,6 +125,7 @@ private:
     void applyVisualStyle();
     bool isVersionGreater(const QString& current, const QString& latest);
     QString formatMarkdownToHtml(const QString& markdown);
+    bool m_disableTrackpadFocus;
 };
 
 #endif /* ApplicationUI_HPP_ */

@@ -452,6 +452,7 @@ void CallService::checkRoute()
     m_input->wait(2000);
     delete m_input;
     m_input = new CallAudioInput(m_audioCfg, m_upRing, this);
+    m_input->setHeard(m_downRing);
     m_input->start(QThread::TimeCriticalPriority);
     restartOutput();
 }
@@ -464,6 +465,7 @@ void CallService::startAudio()
     m_upRing = new AudioRing(m_audioCfg.rate * 2);   // 1 s
     m_downRing = new AudioRing(m_audioCfg.rate * 2);
     m_input = new CallAudioInput(m_audioCfg, m_upRing, this);
+    m_input->setHeard(m_downRing);
     m_output = new CallAudioOutput(m_audioCfg, m_downRing, this);
     m_input->start(QThread::TimeCriticalPriority);
     m_output->start(QThread::TimeCriticalPriority);
@@ -523,6 +525,13 @@ void CallService::collectStats(bool print)
     if (m_input && m_upRing) {
         line += QString(" | mic ovr %1 overflow %2B")
                 .arg(statDelta("ovr", m_input->overruns)).arg(statDelta("upOverflow", m_upRing->overflowBytes()));
+    }
+    if (m_input && m_output) {
+        // The device queues the echo positions are corrected by (last values).
+        const int bytesPerMs = qMax(1, m_audioCfg.rate * 2 / 1000);
+        line += QString(" | devq play %1ms mic %2ms | jitter target %3ms")
+                .arg(int(m_output->queuedBytes) / bytesPerMs).arg(int(m_input->queuedBytes) / bytesPerMs)
+                .arg(m_downRing ? m_downRing->targetBytes() / bytesPerMs : 0);
     }
     if (print && !line.isEmpty()) qDebug() << ("[CALL] stats" + line);
 }

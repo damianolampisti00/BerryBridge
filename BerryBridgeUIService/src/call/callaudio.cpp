@@ -7,6 +7,7 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <sys/select.h>
 #include <sys/asoundlib.h>
 #include <audio/audio_manager_device.h>
@@ -101,6 +102,24 @@ snd_pcm_t *openPcm(const CallAudioConfig &cfg, bool capture, unsigned int *audio
     return pcm;
 }
 
+qint64 nowUs()
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return qint64(ts.tv_sec) * 1000000 + ts.tv_nsec / 1000;
+}
+
+// Bytes in the device queue: for playback written but not yet played, for
+// capture captured but not yet read. 0 if unknown.
+int queued(snd_pcm_t *pcm, int channel)
+{
+    snd_pcm_channel_status_t status;
+    memset(&status, 0, sizeof status);
+    status.channel = channel;
+    if (snd_pcm_plugin_status(pcm, &status) != 0 || status.count < 0) return 0;
+    return status.count;
+}
+
 void recover(snd_pcm_t *pcm, int channel, QAtomicInt *counter)
 {
     snd_pcm_channel_status_t status;
@@ -121,7 +140,7 @@ void recover(snd_pcm_t *pcm, int channel, QAtomicInt *counter)
 CallAudioInput::CallAudioInput(const CallAudioConfig &cfg, AudioRing *sink, QObject *parent) :
         QThread(parent),
         probeOnSum(0), probeOnCount(0), probeOffSum(0), probeOffCount(0),
-        m_cfg(cfg), m_sink(sink), m_stop(0)
+        m_cfg(cfg), m_sink(sink), m_heard(0), m_stop(0)
 {
 }
 
@@ -139,6 +158,16 @@ void CallAudioInput::run()
 
     QByteArray buffer(frag, 0);
     const int fd = snd_pcm_file_descriptor(pcm, SND_PCM_CHANNEL_CAPTURE);
+    // Echo positions (see AudioRing): the mic stream so far, and C, the
+    // speaker stream byte heard with mic byte k being k + C. C is found by
+    // the clock, which is only good to a few ms, so it is kept until the
+    // clock disagrees by more than kTolC for kConfirmC blocks in a row (the
+    // speaker stalled or restarted), then set to the mean of those.
+    const qint64 kTolC = rate * 2 * 8 / 1000;   // 8 ms
+    const int kConfirmC = 5;
+    qint64 devCaptured = 0, c = 0, offSum = 0;
+    bool hasC = false;
+    int off = 0;
     while (!m_stop) {
         fd_set readFds;
         FD_ZERO(&readFds);
@@ -156,7 +185,35 @@ void CallAudioInput::run()
         if (n <= 0) continue;
         bytesCaptured.fetchAndAddRelaxed(int(n));
         if (dump.isOpen()) dump.write(buffer.constData(), n);
-        if (m_sink) m_sink->write(buffer.constData(), int(n));
+        devCaptured += n;
+        const int behind = queued(pcm, SND_PCM_CHANNEL_CAPTURE);
+        queuedBytes = behind;
+        qint64 heard = -1;
+        if (m_heard) {
+            // By the clock: this block's last sample was captured `behind`
+            // bytes ago; which speaker byte was heard then.
+            qint64 dev;
+            if (m_heard->devHeardAt(nowUs() - qint64(behind) * 1000000 / (rate * 2), rate * 2, &dev)) {
+                const qint64 cand = dev - devCaptured;
+                if (!hasC) {
+                    c = cand & ~Q_INT64_C(1);
+                    hasC = true;
+                } else if (qAbs(cand - c) > kTolC) {
+                    offSum += cand;
+                    if (++off >= kConfirmC) {
+                        c = (offSum / off) & ~Q_INT64_C(1);
+                        off = 0;
+                        offSum = 0;
+                    }
+                } else {
+                    off = 0;
+                    offSum = 0;
+                }
+            }
+            if (hasC) heard = qMax(Q_INT64_C(0), devCaptured + c);
+        }
+        if (m_sink && heard >= 0) m_sink->write(buffer.constData(), int(n), heard);
+        else if (m_sink) m_sink->write(buffer.constData(), int(n));
 
         // Echo probe bookkeeping (cheap: one pass over a 20 ms block).
         const qint16 *s = reinterpret_cast<const qint16 *>(buffer.constData());
@@ -192,21 +249,31 @@ void CallAudioOutput::run()
     if (!m_cfg.dumpPrefix.isEmpty()) dump.open(QIODevice::WriteOnly | QIODevice::Truncate);
 
     QByteArray buffer(frag, 0);
-    const int jitterBytes = qMax(frag, m_cfg.rate * 2 * m_cfg.jitterMs / 1000);
+    const int baseJitterBytes = qMax(frag, m_cfg.rate * 2 * m_cfg.jitterMs / 1000);
     const int fragMs = qMax(1, frag * 1000 / (m_cfg.rate * 2));
     bool prebuffering = true;
     quint32 noise = 12345;
     qint64 probeSample = 0;
+    // The speaker stream: bytes written to the device by this thread. Each
+    // block goes to the ring's table (AudioRing::addPlayed), for the echo
+    // positions of the mic.
+    qint64 devWritten = 0;
+    if (m_source) m_source->resetPlayed();
 
     while (!m_stop) {
+        qint64 ringStart = 0;
+        int got = 0;
         if (m_source) {
             // (Re)building the jitter buffer: silence until it holds
             // jitterBytes, the device keeps running (no underrun click).
             // After a pause of the peer (no packets are sent in silence) or
             // a late packet, playing on with an empty buffer would turn every
             // bit of network jitter into a gap in the speech: the crackles.
+            // The size follows the network's jitter (CallLink::trackJitter).
+            const int jitterBytes = qMax(baseJitterBytes, m_source->targetBytes());
             if (prebuffering && m_source->level() >= jitterBytes) prebuffering = false;
             if (prebuffering) {
+                ringStart = m_source->taken();
                 memset(buffer.data(), 0, frag); // the blocking write below paces the loop
             } else {
                 // Latency bound: more than the jitter target + 3 blocks queued
@@ -215,10 +282,11 @@ void CallAudioOutput::run()
                     m_source->skip(frag);
                     dropped.ref();
                 }
+                ringStart = m_source->taken();
                 if (m_source->waitFor(frag, fragMs)) {
-                    m_source->read(buffer.data(), frag);
+                    got = m_source->read(buffer.data(), frag);
                 } else {
-                    const int got = m_source->read(buffer.data(), frag); // partial block, if any
+                    got = m_source->read(buffer.data(), frag); // partial block, if any
                     memset(buffer.data() + got, 0, frag - got);
                     concealed.ref();
                     prebuffering = true; // ran dry: wait for the cushion again
@@ -243,6 +311,13 @@ void CallAudioOutput::run()
             if (n <= 0) continue;
         }
         bytesPlayed.fetchAndAddRelaxed(int(n));
+        if (!m_source) continue;
+
+        // The device plays what was written minus what it still holds.
+        devWritten += n;
+        const int held = int(qMin<qint64>(queued(pcm, SND_PCM_CHANNEL_PLAYBACK), devWritten));
+        queuedBytes = held;
+        m_source->addPlayed(devWritten, int(n), ringStart, qMin(got, int(n)), nowUs(), devWritten - held);
     }
     g_callProbeTone = 0;
     snd_pcm_plugin_flush(pcm, SND_PCM_CHANNEL_PLAYBACK);

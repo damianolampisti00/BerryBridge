@@ -62,7 +62,8 @@ ApplicationUI::ApplicationUI() :
         m_localeHandler(new LocaleHandler(this)),
         m_invokeManager(new InvokeManager(this)),
         m_uiWatcher(new QFileSystemWatcher(this)),
-        m_dbUpdateTrigger(0)
+        m_dbUpdateTrigger(0),
+        m_refreshPending(false)
 {
     // prepare the localization
     if (!QObject::connect(m_localeHandler, SIGNAL(systemLanguageChanged()),
@@ -110,6 +111,14 @@ ApplicationUI::ApplicationUI() :
            this, SLOT(onUIRefreshTriggered(const QString &)))) {
        qWarning() << "Failed to connect file watcher";
     }
+    // Out of full screen a new message only marks the lists stale; they
+    // reload once the app is back (see onUIRefreshTriggered).
+    m_coverTimer.setSingleShot(true);
+    m_coverTimer.setInterval(3000);
+    connect(&m_coverTimer, SIGNAL(timeout()), this, SIGNAL(coverRefreshNeeded()));
+    connect(Application::instance(), SIGNAL(fullscreen()), this, SLOT(onFullscreen()));
+
+    m_disableTrackpadFocus = m_settings.value("settings/disableTrackpadFocus", true).toBool();
 
     m_networkManager = new QNetworkAccessManager(this);
 
@@ -196,8 +205,25 @@ void ApplicationUI::onUIRefreshTriggered(const QString &path)
     // message, so a running UI (even minimized) used to wipe the Hub right
     // after each notification -- the phone vibrated, the Hub stayed empty.
 
+    // Minimized or with the screen off, every message used to reload both
+    // chat lists and the open chat, and mark that chat as read although
+    // nobody was looking (189 reloads in one evening hour).
+    if (!Application::instance()->isFullscreen()) {
+        m_refreshPending = true;
+        if (Application::instance()->isThumbnailed() && !m_coverTimer.isActive()) m_coverTimer.start();
+        return;
+    }
+
     m_dbUpdateTrigger++;
     // main.qml burayı dinlemede
+    emit dbUpdateTriggerChanged();
+}
+
+void ApplicationUI::onFullscreen()
+{
+    if (!m_refreshPending) return;
+    m_refreshPending = false;
+    m_dbUpdateTrigger++;
     emit dbUpdateTriggerChanged();
 }
 
@@ -508,6 +534,34 @@ bool ApplicationUI::hasNewContent(const QString &accountId) const
 {
     QSettings settings(QDir::homePath() + "/Settings/berrybridge_state.ini", QSettings::IniFormat);
     return settings.value(QString("newContent/%1").arg(accountId), false).toBool();
+}
+
+bool ApplicationUI::disableTrackpadFocus() const
+{
+    return m_disableTrackpadFocus;
+}
+
+void ApplicationUI::setDisableTrackpadFocus(bool disable)
+{
+    if (m_disableTrackpadFocus != disable) {
+        m_disableTrackpadFocus = disable;
+        m_settings.setValue("settings/disableTrackpadFocus", disable);
+        m_settings.sync(); // Değişiklikleri diske anında yaz
+        emit disableTrackpadFocusChanged(disable);
+    }
+}
+
+void ApplicationUI::exitApp()
+{
+    bb::cascades::Application::quit();
+}
+
+bool ApplicationUI::isClassic() const
+{
+    bb::device::HardwareInfo info;
+    QString model = info.modelName();
+    // BlackBerry Classic (Q20) model adı kontrolü
+    return model.contains("Classic", Qt::CaseInsensitive) || model.contains("Q20", Qt::CaseInsensitive);
 }
 
 

@@ -64,6 +64,7 @@ private slots:
 
 private:
     void setState(const QString &s) { QMutexLocker l(&m_stateMutex); m_state = s; }
+    void trackJitter(int samples);
 
     OpusEncoder *m_enc;
     OpusDecoder *m_dec;
@@ -82,6 +83,12 @@ private:
     quint32 m_seq;
     quint32 m_lastRxSeq;
     qint64 m_syntheticSent;
+    // Downlink jitter (see trackJitter): the talk spurt's schedule (the clock
+    // at its first sample, the samples received in it), the last arrival,
+    // and the recent peak of lateness, in ms.
+    bool m_jStarted;
+    qint64 m_jAnchorMs, m_jSamples, m_jLastMs;
+    double m_jitMs;
     bool m_stopping;
     QMutex m_stateMutex;
     QString m_state;
