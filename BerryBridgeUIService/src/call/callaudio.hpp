@@ -37,6 +37,9 @@ class CallAudioInput : public QThread
 public:
     // `sink` may be 0 (measure only).
     CallAudioInput(const CallAudioConfig &cfg, AudioRing *sink, QObject *parent = 0);
+    // The downlink ring: each captured block then carries the playback
+    // position heard when it was captured (see AudioRing). Before start().
+    void setHeard(AudioRing *downlink) { m_heard = downlink; }
     void requestStop() { m_stop = 1; }
     QString error() const { return m_error; }
 
@@ -46,6 +49,7 @@ public:
     QAtomicInt actualRate;
     QAtomicInt actualFrag;
     QAtomicInt actualFrags; // fragments the device queue holds
+    QAtomicInt queuedBytes; // captured but not yet read, after the last read
     // Echo probe: mean square of the captured signal while the probe tone
     // plays vs while it is silent (sum and sample count, in 1/16 units).
     qint64 probeOnSum, probeOnCount, probeOffSum, probeOffCount;
@@ -57,6 +61,7 @@ protected:
 private:
     CallAudioConfig m_cfg;
     AudioRing *m_sink;
+    AudioRing *m_heard;
     QAtomicInt m_stop;
     QString m_error;
 };
@@ -79,6 +84,7 @@ public:
     QAtomicInt actualRate;
     QAtomicInt actualFrag;
     QAtomicInt actualFrags;
+    QAtomicInt queuedBytes;   // written but not yet played, after the last write
 
 protected:
     void run();

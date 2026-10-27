@@ -17,6 +17,17 @@ const uchar kKindOpus = 0x03;
 const int kOpusBitrate = 24000;
 const int kFrameMs = 20;          // uplink block: 20 ms (the server re-blocks to MLow's 60 ms)
 const qint64 kMaxBacklog = 32000; // ~1 s of audio waiting in the socket: drop instead of queueing more
+
+// Downlink jitter buffer, adaptive (2026-10-26: on a hotel-grade Wi-Fi the
+// peer's audio came in bursts, the fixed 80 ms buffer overflowed and playback
+// threw away 68 blocks in 16 s). The buffer target is the recent peak of
+// how late frames come against their talk spurt's schedule, plus a margin;
+// it follows a burst at once and falls back over ~10 s.
+const qint64 kSpurtGapMs = 400;  // longer without frames: a pause of the peer, a new schedule
+const double kJitDecay = 0.998;  // per frame (20 ms): ~10 s to forget a burst
+const int kJitMarginMs = 40;     // the gateway sends WhatsApp's 60 ms packets as 3 frames at once
+const int kMinTargetMs = 80;     // the fixed buffer it replaces: unchanged on a good network
+const int kMaxTargetMs = 480;    // beyond this the conversation lags too much: drop instead
 }
 
 CallLink::CallLink(const QUrl &url, const QByteArray &token, bool verifyTls, bool echoTest,
@@ -26,8 +37,30 @@ CallLink::CallLink(const QUrl &url, const QByteArray &token, bool verifyTls, boo
         m_enc(0), m_dec(0), m_opus(false),
         m_url(url), m_token(token), m_verify(verifyTls), m_echo(echoTest), m_synthetic(synthetic),
         m_uplink(uplink), m_downlink(downlink), m_rate(rate),
-        m_ws(0), m_pumpTimer(0), m_seq(0), m_lastRxSeq(0), m_syntheticSent(0), m_stopping(false)
+        m_ws(0), m_pumpTimer(0), m_seq(0), m_lastRxSeq(0), m_syntheticSent(0),
+        m_jStarted(false), m_jAnchorMs(0), m_jSamples(0), m_jLastMs(0), m_jitMs(0), m_stopping(false)
 {
+}
+
+void CallLink::trackJitter(int samples)
+{
+    const qint64 now = m_clock.elapsed();
+    if (!m_jStarted || now - m_jLastMs > kSpurtGapMs) {
+        m_jStarted = true;
+        m_jAnchorMs = now;
+        m_jSamples = 0;
+    }
+    // How late this frame is against the earliest schedule of its spurt.
+    qint64 late = now - (m_jAnchorMs + m_jSamples * 1000 / m_rate);
+    if (late < 0) {        // earlier than ever: the schedule moves up
+        m_jAnchorMs += late;
+        late = 0;
+    }
+    m_jSamples += samples;
+    m_jLastMs = now;
+    m_jitMs = qMax(double(late), m_jitMs * kJitDecay);
+    const int target = qBound(kMinTargetMs, int(m_jitMs) + kJitMarginMs, kMaxTargetMs);
+    if (m_downlink) m_downlink->setTargetBytes(m_rate * 2 * target / 1000);
 }
 
 CallLink::~CallLink()
@@ -113,6 +146,8 @@ void CallLink::setAudio(AudioRing *uplink, AudioRing *downlink)
     m_uplink = uplink;
     m_downlink = downlink;
     if (m_uplink) m_uplink->clear();
+    m_jStarted = false; // a new call: the last one's jitter is no guide
+    m_jitMs = 0;
     updatePump();
 }
 
@@ -173,9 +208,13 @@ void CallLink::onBinary(const QByteArray &data)
         qint16 pcm[16000 * 120 / 1000 + 1]; // any Opus packet at up to 16 kHz
         const int n = opus_decode(m_dec, reinterpret_cast<const unsigned char *>(data.constData() + kHeader),
                                   data.size() - kHeader, pcm, 16000 * 120 / 1000, 0);
-        if (n > 0) m_downlink->write(reinterpret_cast<const char *>(pcm), n * 2);
+        if (n > 0) {
+            trackJitter(n);
+            m_downlink->write(reinterpret_cast<const char *>(pcm), n * 2);
+        }
         return;
     }
+    trackJitter((data.size() - kHeader) / 2);
     m_downlink->write(data.constData() + kHeader, data.size() - kHeader);
 }
 
@@ -215,9 +254,14 @@ void CallLink::pump()
         if (m_downlink) {
             // Flag 0x01: [2:4] = downlink samples played so far (mod 65536),
             // when this block was captured. The gateway lines up what it sent
-            // with what the mic heard, to cancel the speaker's echo.
+            // with what the mic heard, to cancel the speaker's echo. Counted
+            // in samples by the audio threads (see AudioRing); what has left
+            // the ring by now only if that is missing.
+            qint64 dev, heard;
+            if (!m_uplink || !m_uplink->heardAt(m_uplink->taken(), &dev) || !m_downlink->ringAtDev(dev, &heard))
+                heard = m_downlink->taken();
             h[1] = 0x01;
-            qToLittleEndian<quint16>(quint16(m_downlink->taken() / 2), h + 2);
+            qToLittleEndian<quint16>(quint16(heard / 2), h + 2);
         }
         qToLittleEndian<quint32>(++m_seq, h + 4);
         qToLittleEndian<quint32>(quint32(m_clock.elapsed()), h + 8);
