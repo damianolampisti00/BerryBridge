@@ -70,6 +70,7 @@ Database::Database(QObject *parent) : QObject(parent)
     m_netConfManager = new QNetworkConfigurationManager(this);
     m_lastSyncTimestamp = "1970-01-01T00:00:00Z";
     m_nextCursor = "";
+    m_searchRequestId = 0;
 
     // (Was `if (!m_invokeManager)` on a member nothing had initialized yet.)
     m_invokeManager = new bb::system::InvokeManager(this);
@@ -82,8 +83,10 @@ Database::Database(QObject *parent) : QObject(parent)
 
     m_invokeManager = new InvokeManager(this);
     m_chatsReply = 0;
+    m_contactsReply = 0;
     chatPercent = 0;
     initContext();
+    initAvatarDatabase();
     m_url = m_settings.value("serverUrl").toString();
     m_accessToken = m_settings.value("accessToken").toString();
     // Set up already: the cache was deleted when the app last closed.
@@ -400,7 +403,6 @@ void Database::onAccountsFetched() {
             // accID -> network eşleşmesi
             m_settings.setValue(accID, network);
 
-            // YENİ: accID ile ilişkili loginID eşleşmesi (Örn: "whatsapp_loginID" -> "905356822935")
             m_settings.setValue(accID + "_loginID", loginID);
 
             if (!m_settings.contains("state_" + accID)) {
@@ -476,7 +478,7 @@ QVariantList Database::getChatListForAccount(const QString &accountID, int limit
     }
 
     QSqlQuery query(db);
-    // LIMIT ve OFFSET eklendi
+    // imgURL sütunu sorguya eklendi
     query.prepare("SELECT id, title, type, unreadCount, lastActivity, "
                   "isPinned, isArchived, isMuted, preview_json, isReadOnly, "
                   "imgURL, participants_json "
@@ -494,7 +496,6 @@ QVariantList Database::getChatListForAccount(const QString &accountID, int limit
         return chatList;
     }
 
-    // 3. ADIM: Veri İşleme
     QSqlRecord rec = query.record();
     const int idIdx = rec.indexOf("id");
     const int titleIdx = rec.indexOf("title");
@@ -505,23 +506,22 @@ QVariantList Database::getChatListForAccount(const QString &accountID, int limit
     const int archivedIdx = rec.indexOf("isArchived");
     const int mutedIdx = rec.indexOf("isMuted");
     const int readOnlyIdx = rec.indexOf("isReadOnly");
-    const int imgIdx = rec.indexOf("imgURL");
-    const int participantsIdx = rec.indexOf("participants_json");
-
-    // İPTAL EDİLEN: const int previewIdx = rec.indexOf("preview");
-    // EKLENEN: Sütun adını preview_json olarak güncelledik
     const int previewIdx = rec.indexOf("preview_json");
+    const int imgUrlIdx = rec.indexOf("imgURL"); // Avatar URL sütunu
+    const int participantsIdx = rec.indexOf("participants_json"); // Avatar URL sütunu
 
-    bb::data::JsonDataAccess jda; // JSON ayrıştırıcıyı döngü dışında tanımlıyoruz
+    bb::data::JsonDataAccess jda;
 
     while (query.next()) {
+        QString chatID = query.value(idIdx).toString();
         QString chatTitle = query.value(titleIdx).toString();
         QString timestamp = query.value(lastActivityIdx).toString();
         QString chatType = query.value(typeIdx).toString();
-
+        QString chatImgUrl = query.value(imgUrlIdx).toString();
+        QString participantsJsonStr = query.value(participantsIdx).toString();
         QVariantMap chat;
         chat["accountID"] = accountID;
-        chat["chatID"] = query.value(idIdx).toString();
+        chat["chatID"] = chatID;
         chat["chatName"] = chatTitle;
         chat["unreadCount"] = query.value(unreadIdx).toInt();
 
@@ -535,18 +535,16 @@ QVariantList Database::getChatListForAccount(const QString &accountID, int limit
 
         // "" until the thumbnail is cached (avatarFor starts the download;
         // the list reloads by itself once it has arrived).
-        chat["avatarPath"] = avatarFor(avatarSourceFor(chatType, query.value(imgIdx).toString(),
-                                                       query.value(participantsIdx).toString()));
+        chat["avatarPath"] = avatarFor(avatarSourceFor(chatType, chatImgUrl, participantsJsonStr));
+        // The original's QML reads avatarUrl: the same thumbnail.
+        chat["avatarUrl"] = chat["avatarPath"];
 
-
-        // --- YENİ PREVIEW JSON İŞLEME MANTIĞI ---
+        // --- PREVIEW JSON İŞLEME MANTIĞI ---
         QString previewJsonStr = query.value(previewIdx).toString();
         QString lastMsgText = "";
         QString lastMsgType = "TEXT";
         bool isSender = false;
         QString senderName = "";
-
-        //qDebug()<<"[DATABASE] previewJsonStr"<<previewJsonStr;
 
         if (!previewJsonStr.isEmpty()) {
             QVariantMap previewMap = jda.loadFromBuffer(previewJsonStr).toMap();
@@ -565,7 +563,7 @@ QVariantList Database::getChatListForAccount(const QString &accountID, int limit
             QString lowerTitle = chatTitle.toLower();
             if (lowerTitle.contains("status") || lowerTitle.contains("broadcast")) {
                 chatType = "status";
-            } else if (senderName.contains("bot", Qt::CaseInsensitive)) { // Küçük/büyük harf duyarsız yapıldı
+            } else if (senderName.contains("bot", Qt::CaseInsensitive)) {
                 chatType = "channel";
             }
         }
@@ -575,21 +573,19 @@ QVariantList Database::getChatListForAccount(const QString &accountID, int limit
         }
 
         if (chatType != "single" && chatType != "channel" && !displayBody.isEmpty()){
-            // Grup sohbeti mantığı
             plainBody = QString("%1: %2").arg(senderName.toUpper()).arg(displayBody);
-        }else {
+        } else {
             plainBody = displayBody;
         }
 
-        //bool isReaction=displayBody.contains("reacted");
-        bool isDel=displayBody.contains("deleted");
-        bool isEdit=displayBody.contains("edited");
+        bool isDel = displayBody.contains("deleted");
+        bool isEdit = displayBody.contains("edited");
 
         if (isDel || isEdit){
             plainBody = QString("%1 %2").arg(senderName.toUpper()).arg(displayBody);
         }
 
-        if(isDel && chatType == "group"){
+        if (isDel && chatType == "group"){
             plainBody = " A message is deleted";
         }
 
@@ -602,7 +598,7 @@ QVariantList Database::getChatListForAccount(const QString &accountID, int limit
             chat["avatarInitial"] = "S";
         }
 
-        chat["chatType"] = chatType; // Manipüle edilmiş type'ı sonradan atıyoruz
+        chat["chatType"] = chatType;
 
         chatList.append(chat);
     }
@@ -610,7 +606,6 @@ QVariantList Database::getChatListForAccount(const QString &accountID, int limit
     qDebug() << "[DATABASE] Loaded" << chatList.size() << "chats for account:" << accountID;
     return chatList;
 }
-
 void Database::syncChats(const QString &cursor, QString callbackAction) {
     if (m_chatsReply && cursor.isEmpty()) return;
 
@@ -906,7 +901,7 @@ void Database::onInitialMessagesFetched() {
                 }
                 ins.addBindValue(attachmentsJson);
 
-                QString reactionsJson = "[]";
+                QString reactionsJson = "";
                 QVariantList rawReactions = msg["reactions"].toList();
                 if (!rawReactions.isEmpty()) {
                     QByteArray buffer;
@@ -921,7 +916,7 @@ void Database::onInitialMessagesFetched() {
                 ins.addBindValue(msg["linkedMessageID"].toString());
 
                 // --- 2. Mentions ---
-                QString mentionsJson = "[]";
+                QString mentionsJson = "";
                 QVariantList mentionsList = msg["mentions"].toList();
                 if (!mentionsList.isEmpty()) {
                     QByteArray buffer;
@@ -931,7 +926,7 @@ void Database::onInitialMessagesFetched() {
                 ins.addBindValue(mentionsJson);
 
                 // --- 3. Seen (Sorun Yaşadığınız Kısım) ---
-                QString seenJson = "{}";
+                QString seenJson = "";
                 QVariantMap seenMap = msg["seen"].toMap();
                 if (!seenMap.isEmpty()) {
                     QByteArray buffer;
@@ -1825,6 +1820,7 @@ void Database::downloadAttachment(const QString &mxcUrl, const QString &messageI
     QString localPath = dirPath + "/" + fileName;
 
     qDebug() << "[DATABASE] Requesting download for type:" << typeUpper << " Path:" << localPath;
+    qDebug() << "[DATABASE] mxcUrl:" << mxcUrl;
 
     // Dosya zaten indirilmişse tekrar ağ isteği atma, doğrudan önbellekten kullan
     if (QFile::exists(localPath)) {
@@ -2207,80 +2203,6 @@ void Database::markAllChatsAsRead(const QString &accountID) {
     }
 }
 
-Q_INVOKABLE QVariantList Database::getGroupsFromDb(const QString &searchQuery, const QString &accountID) {
-    QVariantList list;
-
-    // 1. ADIM: initContext ile oluşturulan kalıcı bağlantıyı al
-    QSqlDatabase db = QSqlDatabase::database("chats_db_conn");
-
-    if (!db.isOpen()) {
-        qWarning() << "[DATABASE] chats_db_conn kapalı, açılmaya çalışılıyor...";
-        if (!db.open()) return list;
-    }
-
-    // 2. ADIM: Dinamik SQL sorgusunu kurgula
-    // SQLite'da verimlilik için sütunları açıkça belirtiyoruz
-    QString sql = "SELECT id, title, accountID FROM chats WHERE type = 'group'";
-
-    if (!accountID.isEmpty()) {
-        sql += " AND accountID = ?";
-    }
-
-    if (!searchQuery.isEmpty()) {
-        sql += " AND title LIKE ?";
-    }
-
-    QSqlQuery query(db);
-    query.prepare(sql);
-
-    // 3. ADIM: Değerleri bağla (Bind)
-    int bindIdx = 0;
-    if (!accountID.isEmpty()) {
-        query.bindValue(bindIdx++, accountID);
-    }
-    if (!searchQuery.isEmpty()) {
-        // LIKE sorgusu için joker karakterleri ekliyoruz
-        query.bindValue(bindIdx++, "%" + searchQuery + "%");
-    }
-
-    // 4. ADIM: Sorguyu çalıştır ve listeyi doldur
-    if (query.exec()) {
-        while (query.next()) {
-            // 1. Verileri al
-            QString cTitle = query.value(1).toString();
-            QString lowerTitle = cTitle.toLower();
-
-            // 2. Filtreleri uygula (Map oluşturmadan önce)
-            if (lowerTitle.contains("status") || lowerTitle.contains("broadcast")) {
-                continue;
-            }
-
-            // 3. Filtreyi geçenleri listeye ekle
-            QVariantMap map;
-            map["id"] = query.value(0).toString();
-            map["displayName"] = cTitle;
-            map["network"] = query.value(2).toString();
-            map["type"] = "group";
-
-            // --- EKSİK ALANLAR (QML Hata Vermesin Diye) ---
-            map["number"] = "";
-            map["emails"] = QStringList(); // Rehberdeki emails dizisiyle aynı tipte boş dizi
-            map["avatarUrl"] = "";         // Boş resim URL'si (default_avatar.png'ye düşer)
-            // ---------------------------------------------
-
-            list << map;
-        }
-    } else {
-        qWarning() << "[DATABASE] getGroupsFromDb hatası:" << query.lastError().text();
-    }
-
-    // !!! KRİTİK KONTROL: DB'den gerçekten grup dönüyor mu?
-    qDebug() << "[DEBUG-GROUPS] accountID:" << accountID << " | Arama:" << searchQuery
-             << " | Bulunan Grup Sayısı:" << list.size();
-
-    return list;
-}
-
 QString Database::searchChatByPhone(const QString &searchTerm, const QString &accID) {
     if (searchTerm.isEmpty()) return "";
 
@@ -2422,6 +2344,9 @@ QVariantList Database::getDeviceContacts(const QString &userFilter) {
             }
         }
         entry["emails"] = emails; // QML tarafında bu anahtar ile çağrılacak
+        entry["avatarUrl"] = "";
+        entry["type"] = "single";
+        entry["network"] = "local";
         // ---------------------------------------
         combinedContacts.append(entry);
     }
@@ -2435,6 +2360,7 @@ bool Database::initContext() {
     QDir().mkpath(bbCacheDir()); // the private cache folder (cachepaths.hpp)
     bool messagesSuccess = false;
     bool chatsSuccess = false;
+    bool contactsSuccess = false;
 
     // 1. MESSAGES KANALI
     if (QSqlDatabase::contains("messages_db_conn")) {
@@ -2545,8 +2471,49 @@ bool Database::initContext() {
         }
     }
 
+    // 3. CONTACTS
+        if (QSqlDatabase::contains("contacts_db_conn")) {
+            {
+                QSqlDatabase oldDb = QSqlDatabase::database("contacts_db_conn");
+                oldDb.close();
+            }
+            QSqlDatabase::removeDatabase("contacts_db_conn");
+        }
+
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "contacts_db_conn");
+            db.setDatabaseName(bbCachePath("contacts.db"));
+            if (!db.open()) {
+                qCritical() << "[CRITICAL] Contacts dosyası acilamadi:" << db.lastError().text();
+                return false;
+            }
+            QSqlQuery q(db);
+            q.exec("PRAGMA journal_mode=WAL;");
+            q.exec("PRAGMA synchronous=NORMAL;");
+            q.exec("PRAGMA busy_timeout=5000;");
+
+            QString createTable = "CREATE TABLE IF NOT EXISTS contacts ("
+                                  "id TEXT PRIMARY KEY, "
+                                  "cannotMessage INTEGER, "
+                                  "accountID TEXT, "
+                                  "email TEXT, "
+                                  "fullName TEXT, "
+                                  "imgURL TEXT, "
+                                  "isSelf INTEGER, "
+                                  "phoneNumber TEXT, "
+                                  "username TEXT)";
+
+            contactsSuccess = q.exec(createTable);
+
+            if (!contactsSuccess) {
+                qCritical() << "Contacts Tablo Olusturma Hatasi:" << q.lastError().text();
+            } else {
+                qDebug() << "Contacts tablosu başarıyla hazırlandı.";
+            }
+        }
+
     // Sadece bağlantıların açık olmasını değil, tabloların da başarıyla kurulduğunu garanti ediyoruz
-    return messagesSuccess && chatsSuccess;
+    return messagesSuccess && chatsSuccess && contactsSuccess;
 }
 
 Q_INVOKABLE void Database::setMute(const QString &chatID, bool value) {
@@ -2819,7 +2786,7 @@ QString Database::getCredentials(const QString &key, const QString &defaultValue
     return settings.value(key, defaultValue).toString();
 }
 
-void Database::createChat(const QString& accountID, const QString& participantID, const QString& chatType)
+void Database::createChat(const QString& accountID, const QString& participantID, const QString& chatType, const QString& avatar)
 {
     // Şemadaki endpoint: /v1/chats
     QString fullUrl = m_url;
@@ -2854,7 +2821,10 @@ void Database::createChat(const QString& accountID, const QString& participantID
     QString jsonString = jsonTemplate.arg(accountID).arg(participantID).arg(chatType);
     QByteArray jsonPayload = jsonString.toUtf8();
 
+
+
     QNetworkReply* reply = m_netManager->post(request, jsonPayload);
+    reply->setProperty("avatar", avatar);
     connect(reply, SIGNAL(finished()), this, SLOT(onCreateChatFinished()));
 }
 
@@ -2863,19 +2833,21 @@ void Database::onCreateChatFinished()
     QNetworkReply* reply = qobject_cast<QNetworkReply*>(sender());
     if (!reply) return;
 
+    QString avatar = reply->property("avatar").toString();
+
     int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
     QByteArray responseData = reply->readAll();
 
     reply->deleteLater();
 
     if (statusCode == 200) {
-        emit chatCreatedSuccess(QString::fromUtf8(responseData));
+        emit chatCreatedSuccess(QString::fromUtf8(responseData),avatar);
         return;
     }
 
     if (statusCode == 404) {
         //QTimer::singleShot(1000, this, SLOT(verifyChatFromList()));
-        emit chatCreatedSuccess(QString::fromUtf8(responseData));
+        emit chatCreatedSuccess(QString::fromUtf8(responseData),avatar);
         return;
     }
 
@@ -3979,7 +3951,7 @@ void Database::onSyncResponseReceived()
                     attachmentsJson = QString::fromUtf8(buffer);
                 }
 
-                QString reactionsJson = "[]";
+                QString reactionsJson = "";
                 QVariantList rawReactions = msg["reactions"].toList();
                 if (!rawReactions.isEmpty()) {
                     buffer.clear();
@@ -3987,7 +3959,7 @@ void Database::onSyncResponseReceived()
                     reactionsJson = QString::fromUtf8(buffer);
                 }
 
-                QString mentionsJson = "[]";
+                QString mentionsJson = "";
                 QVariantList mentionsList = msg["mentions"].toList();
                 if (!mentionsList.isEmpty()) {
                     buffer.clear();
@@ -3995,7 +3967,7 @@ void Database::onSyncResponseReceived()
                     mentionsJson = QString::fromUtf8(buffer);
                 }
 
-                QString seenJson = "{}";
+                QString seenJson = "";
                 QVariantMap seenMap = msg["seen"].toMap();
                 if (!seenMap.isEmpty()) {
                     buffer.clear();
@@ -4236,4 +4208,525 @@ void Database::sendNotificationToService(
 void Database::onAnyReplyFinished(QNetworkReply *reply)
 {
     if (reply && reply->error() == QNetworkReply::HostNotFoundError) res_init();
+}
+
+bool Database::initAvatarDatabase() {
+    bool avatarsSuccess = false;
+
+    // Bağlantı daha önceden kalmışsa güvenli şekilde temizle
+    if (QSqlDatabase::contains("avatars_db_conn")) {
+        {
+            QSqlDatabase oldDb = QSqlDatabase::database("avatars_db_conn");
+            oldDb.close();
+        }
+        QSqlDatabase::removeDatabase("avatars_db_conn");
+    }
+
+    // Ayrı bir veritabanı bağlantısı ve dosyası oluşturuyoruz
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "avatars_db_conn");
+        db.setDatabaseName(bbCachePath("contact_avatars.db"));
+
+        if (!db.open()) {
+            qCritical() << "[CRITICAL] Avatars dosyası açılamadı:" << db.lastError().text();
+            return false;
+        }
+
+        QSqlQuery q(db);
+        q.exec("PRAGMA journal_mode=WAL;");
+        q.exec("PRAGMA synchronous=NORMAL;");
+        q.exec("PRAGMA busy_timeout=5000;"); // Eşzamanlı erişim kilitlenmelerini önlemek için
+
+        avatarsSuccess = q.exec(
+            "CREATE TABLE IF NOT EXISTS chat_avatars ("
+            "chatID TEXT PRIMARY KEY, "
+            "imgURL TEXT, "
+            "localURL TEXT"
+            ")"
+        );
+
+        if (!avatarsSuccess) {
+            qCritical() << "Avatars Tablo Oluşturma Hatası:" << q.lastError().text();
+        } else {
+            qDebug() << "Avatars veritabanı ve tablosu başarıyla hazırlandı.";
+        }
+    }
+
+    return avatarsSuccess;
+}
+
+void Database::downloadAvatar(const QString &chatID, const QString &imgUrl) {
+    if (chatID.isEmpty() || imgUrl.isEmpty()) return;
+
+    QString dirPath = bbCachePath("contact_avatars"); // private cache, like ours
+    QDir dir(dirPath);
+    if (!dir.exists()) {
+        dir.mkpath(".");
+        // Galeride görünmemesi için .nomedia dosyası oluşturuyoruz
+        QFile nomediaFile(dirPath + "/.nomedia");
+        if (nomediaFile.open(QIODevice::WriteOnly)) {
+            nomediaFile.close();
+        }
+    }
+
+    QString safeChatId = QString(chatID.toUtf8().toHex());
+    QString localPath = dirPath + "/" + safeChatId + ".jpg";
+
+    qDebug() << "[DATABASE] Requesting avatar download for chatID:" << chatID << " Path:" << localPath;
+
+    // --- URL / DOSYA YOLU DÖNÜŞTÜRME MANTIĞI ---
+    QString formattedImgUrl = imgUrl;
+
+    // Eğer gelen değer http, mxc, localmxc veya file ile başlamıyorsa (yani düz bir yerel dosya yoluysa)
+    if (!formattedImgUrl.startsWith("http://") &&
+        !formattedImgUrl.startsWith("https://") &&
+        !formattedImgUrl.startsWith("mxc://") &&
+        !formattedImgUrl.startsWith("localmxc://") &&
+        !formattedImgUrl.startsWith("file://")) {
+
+        // Windows ters bölülerini (backslash) düz bölüye (slash) çeviriyoruz
+        formattedImgUrl.replace('\\', '/');
+
+        // Sürücü harfiyle (örn. C:/) veya mutlak yolla başlıyorsa file:/// ekliyoruz
+        if (formattedImgUrl.contains(":/")) {
+            formattedImgUrl = "file:///" + formattedImgUrl;
+        } else if (formattedImgUrl.startsWith("/")) {
+            formattedImgUrl = "file://" + formattedImgUrl;
+        } else {
+            formattedImgUrl = "file:///" + formattedImgUrl;
+        }
+    }
+
+    QUrl url;
+    if (formattedImgUrl.startsWith("http://") || formattedImgUrl.startsWith("https://")) {
+        url = QUrl(formattedImgUrl);
+    } else {
+        url = QUrl(m_url + "/v1/assets/serve");
+        url.addQueryItem("url", formattedImgUrl);
+    }
+
+    QNetworkRequest request(url);
+    QString authHeader = "Bearer " + m_accessToken;
+    request.setRawHeader("Authorization", authHeader.toLatin1());
+
+    QNetworkReply* reply = m_netManager->get(request);
+    reply->setProperty("chatID", chatID);
+    reply->setProperty("imgURL", imgUrl);
+    reply->setProperty("localPath", localPath);
+
+    connect(reply, SIGNAL(finished()), this, SLOT(onAvatarDownloaded()));
+}
+
+void Database::onAvatarDownloaded() {
+    QNetworkReply* reply = qobject_cast<QNetworkReply*>(sender());
+    if (!reply) return;
+
+    reply->deleteLater();
+
+    if (reply->error() != QNetworkReply::NoError) {
+        qWarning() << "[DATABASE] Avatar download failed:" << reply->errorString();
+        return;
+    }
+
+    QString chatID = reply->property("chatID").toString();
+    QString imgUrl = reply->property("imgURL").toString();
+    QString localPath = reply->property("localPath").toString();
+
+    QFile file(localPath);
+    if (file.open(QIODevice::WriteOnly)) {
+        file.write(reply->readAll());
+        file.close();
+
+        // Ayrı olan avatar veritabanına kayıt işlemi
+        QSqlDatabase db = QSqlDatabase::database("avatars_db_conn");
+        if (db.isOpen()) {
+            db.transaction(); // Güvenli işlem bloku başlatıyoruz
+            QSqlQuery query(db);
+            query.prepare("INSERT OR REPLACE INTO chat_avatars (chatID, imgURL, localURL) VALUES (?, ?, ?)");
+            query.addBindValue(chatID);
+            query.addBindValue(imgUrl);
+            query.addBindValue(localPath);
+
+            if (!query.exec()) {
+                qWarning() << "[DATABASE] Failed to save avatar cache:" << query.lastError().text();
+                db.rollback(); // Hata durumunda işlemi geri al
+            } else {
+                db.commit();   // Başarıyla diske işle
+            }
+        }
+
+        emit avatarDownloaded(chatID, "file://" + localPath);
+    }
+}
+
+void Database::searchContacts(const QString &accountID, const QString &cursor, const QString &searchQuery) {
+    if (accountID.isEmpty()) return;
+
+    // 1. Her yeni aramada sayacı 1 artırıyoruz ve bu isteğe özel ID veriyoruz
+    m_searchRequestId++;
+    int currentRequestId = m_searchRequestId;
+
+    if (m_contactsReply) {
+        m_contactsReply->abort();
+        m_contactsReply->disconnect();
+        m_contactsReply->deleteLater();
+        m_contactsReply = 0;
+    }
+
+    QUrl url(m_url + "/v1/accounts/" + accountID + "/contacts/list");
+    url.addQueryItem("limit", "10");
+    if (!searchQuery.isEmpty()) url.addQueryItem("query", searchQuery);
+    if (!cursor.isEmpty() && cursor != "null") {
+        url.addQueryItem("cursor", cursor);
+        url.addQueryItem("direction", "before");
+    }
+
+    QNetworkRequest request(url);
+    request.setRawHeader("Authorization", "Bearer " + m_accessToken.toLatin1());
+
+    m_contactsReply = m_netManager->get(request);
+    if (!m_contactsReply) return;
+
+    // 2. İstek objesine bu ID'yi mühürlüyoruz
+    m_contactsReply->setProperty("requestId", currentRequestId);
+    m_contactsReply->setProperty("accountID", accountID);
+    m_contactsReply->setProperty("searchQuery", searchQuery);
+
+    connect(m_contactsReply, SIGNAL(finished()), this, SLOT(onContactsFetched()));
+}
+
+
+void Database::onContactsFetched() {
+    if (!m_contactsReply) return;
+
+    // --- 1. KESİN KORUMA: Eski/Çöp İstekleri Ayıkla ---
+    int replyRequestId = m_contactsReply->property("requestId").toInt();
+    if (replyRequestId != m_searchRequestId) {
+        qDebug() << "[DATABASE] Eski/İptal edilen arama isteği yakalandı. Veritabanına yazılmadan reddedildi. ID:" << replyRequestId;
+        m_contactsReply->deleteLater();
+        m_contactsReply = 0;
+        return;
+    }
+
+    // --- 2. AĞ / İNTERNET BAĞLANTI HATASI KONTROLÜ ---
+    if (m_contactsReply->error() != QNetworkReply::NoError) {
+        QString errString = m_contactsReply->errorString();
+        qWarning() << "[DATABASE] Ağ bağlantı hatası oluştu:" << errString;
+
+        emit searchContactsError(errString); // QML'e hata mesajını gönder
+
+        m_contactsReply->deleteLater();
+        m_contactsReply = 0;
+        return;
+    }
+    // ----------------------------------------------------
+
+    QString accountID = m_contactsReply->property("accountID").toString();
+    QString searchQuery = m_contactsReply->property("searchQuery").toString();
+    QString callback = m_contactsReply->property("callbackAction").toString();
+    QByteArray responseData = m_contactsReply->readAll();
+
+    m_contactsReply->deleteLater();
+    m_contactsReply = 0;
+
+    bb::data::JsonDataAccess jda;
+    QVariantMap root = jda.loadFromBuffer(responseData).toMap();
+
+    if (jda.hasError()) {
+        qWarning() << "[DATABASE] JSON Parse Error in onContactsFetched for account:" << accountID;
+        return;
+    }
+
+    QVariantList items = root["items"].toList();
+    bool hasMore = root["hasMore"].toBool();
+    QString oldestCursor = root["oldestCursor"].toString();
+
+    qDebug() << "[DATABASE] Account:" << accountID
+             << "| Query:" << searchQuery
+             << "| Gelen contact sayısı:" << items.size()
+             << "| hasMore:" << hasMore;
+
+    // Avatar listesi için QStringList hazırlığı
+    QStringList avatarIdsToDownload;
+    QStringList avatarUrlsToDownload;
+
+    if (!items.isEmpty()) {
+            QSqlDatabase db = QSqlDatabase::database("contacts_db_conn");
+            if (!db.isOpen()) {
+                qWarning() << "[DATABASE] contacts_db_conn bağlantısı açık değil!";
+                return;
+            }
+
+            db.transaction();
+            QSqlQuery query(db);
+            query.prepare("INSERT OR REPLACE INTO contacts (id, cannotMessage, accountID, email, fullName, imgURL, isSelf, phoneNumber, username) "
+                          "VALUES (:id, :cannotMessage, :accountID, :email, :fullName, :imgURL, :isSelf, :phoneNumber, :username)");
+
+            QSqlDatabase avatarDb = QSqlDatabase::database("avatars_db_conn");
+            bool avatarDbOpen = avatarDb.isOpen();
+
+            QSqlQuery avatarQuery(avatarDb);
+            if (avatarDbOpen) {
+                avatarQuery.prepare("SELECT imgURL, localURL FROM chat_avatars WHERE chatID = ?");
+            }
+
+            foreach (const QVariant &v, items) {
+                if (replyRequestId != m_searchRequestId) {
+                    db.rollback();
+                    return;
+                }
+
+                QVariantMap contact = v.toMap();
+                QString rawID = contact["id"].toString();
+
+                // --- ID'Yİ NORMALİZE ET (Mükerrerliği önlemek için) ---
+                // Örn: "@whatsapp_905301234567:beeper.local" -> "905301234567"
+                QString contactID = rawID;
+                if (contactID.startsWith("@")) {
+                    int underscoreIdx = contactID.indexOf("_");
+                    int colonIdx = contactID.indexOf(":");
+                    if (underscoreIdx != -1 && colonIdx != -1 && colonIdx > underscoreIdx) {
+                        contactID = contactID.mid(underscoreIdx + 1, colonIdx - (underscoreIdx + 1));
+                    }
+                }
+                // ------------------------------------------------------
+
+                QString contImgUrl = contact["imgURL"].toString();
+
+                // Artık normalize edilmiş 'contactID' veritabanına yazılıyor
+                query.bindValue(":id", contactID);
+                query.bindValue(":cannotMessage", contact["cannotMessage"].toBool() ? 1 : 0);
+                query.bindValue(":accountID", accountID);
+                query.bindValue(":email", contact["email"].toString());
+                query.bindValue(":fullName", contact["fullName"].toString());
+                query.bindValue(":imgURL", contImgUrl);
+                query.bindValue(":isSelf", contact["isSelf"].toBool() ? 1 : 0);
+                query.bindValue(":phoneNumber", contact["phoneNumber"].toString());
+                query.bindValue(":username", contact["username"].toString());
+
+                if (!query.exec()) {
+                    qWarning() << "[DATABASE] Contact insert error:" << query.lastError().text();
+                }
+
+                if (avatarDbOpen && !contImgUrl.isEmpty()) {
+                    avatarQuery.bindValue(0, contactID);
+                    bool needsDownload = true;
+
+                    if (avatarQuery.exec() && avatarQuery.next()) {
+                        QString cachedImgUrl = avatarQuery.value(0).toString();
+                        QString cachedLocalUrl = avatarQuery.value(1).toString();
+
+                        if (cachedImgUrl == contImgUrl && !cachedLocalUrl.isEmpty() && QFile::exists(cachedLocalUrl)) {
+                            needsDownload = false;
+                        }
+                    } else {
+                        qDebug() << "[AVATAR CHECK] DB'de kayıt bulunamadı, indirilecek ID:" << contactID;
+                    }
+
+                    avatarQuery.finish();
+
+                    if (needsDownload) {
+                        avatarIdsToDownload.append(contactID);
+                        avatarUrlsToDownload.append(contImgUrl);
+                    }
+                }
+            }
+            db.commit();
+        }
+
+    if (!avatarIdsToDownload.isEmpty()) {
+        for (int i = 0; i < avatarIdsToDownload.size(); ++i) {
+            downloadAvatar(avatarIdsToDownload[i], avatarUrlsToDownload[i]);
+        }
+    }
+
+    // --- PAGINATION & CALLBACK KARARLARI ---
+    if (hasMore && !oldestCursor.isEmpty() && !items.isEmpty()) {
+        // Sayfalama devam ederken de güncel isteğin bozulmadığından emin olalım
+        if (replyRequestId != m_searchRequestId) return;
+
+        qDebug() << "[DATABASE] Arama için sonraki sayfa isteniyor. Cursor:" << oldestCursor;
+        searchContacts(accountID, oldestCursor, searchQuery);
+    } else {
+        if (replyRequestId != m_searchRequestId) return;
+
+        qDebug() << "[DATABASE] Arama/Sync tamamlandı. Account:" << accountID;
+        emit searchContactsFinished();
+
+    }
+}
+
+Q_INVOKABLE QVariantList Database::getGroupsFromDb(const QString &searchQuery, const QString &accountID) {
+    QVariantList list;
+
+    // 1. ADIM: initContext ile oluşturulan kalıcı bağlantıyı al
+    QSqlDatabase db = QSqlDatabase::database("chats_db_conn");
+
+    if (!db.isOpen()) {
+        qWarning() << "[DATABASE] chats_db_conn kapalı, açılmaya çalışılıyor...";
+        if (!db.open()) return list;
+    }
+
+    // 2. ADIM: Dinamik SQL sorgusunu kurgula
+    // SQLite'da verimlilik için sütunları açıkça belirtiyoruz
+    QString sql = "SELECT id, title, accountID, imgURL, isReadOnly FROM chats WHERE type = 'group'";
+
+    if (!accountID.isEmpty()) {
+        sql += " AND accountID = ?";
+    }
+
+    if (!searchQuery.isEmpty()) {
+        sql += " AND title LIKE ?";
+    }
+
+    QSqlQuery query(db);
+    query.prepare(sql);
+
+    // 3. ADIM: Değerleri bağla (Bind)
+    int bindIdx = 0;
+    if (!accountID.isEmpty()) {
+        query.bindValue(bindIdx++, accountID);
+    }
+    if (!searchQuery.isEmpty()) {
+        // LIKE sorgusu için joker karakterleri ekliyoruz
+        query.bindValue(bindIdx++, "%" + searchQuery + "%");
+    }
+
+    QSqlDatabase avatarDb = QSqlDatabase::database("avatars_db_conn");
+
+    // 4. ADIM: Sorguyu çalıştır ve listeyi doldur
+    if (query.exec()) {
+        while (query.next()) {
+            // 1. Verileri al
+            QString chatID = query.value(0).toString();
+            QString cTitle = query.value(1).toString();
+            QString lowerTitle = cTitle.toLower();
+
+            // 2. Filtreleri uygula (Map oluşturmadan önce)
+            if (lowerTitle.contains("status") || lowerTitle.contains("broadcast")) {
+                continue;
+            }
+
+            // 3. Filtreyi geçenleri listeye ekle
+            QVariantMap map;
+            map["id"] = chatID;
+            map["displayName"] = cTitle;
+            map["network"] = query.value(2).toString();
+            map["isReadOnly"] = query.value(4).toBool();
+            map["type"] = "group";
+
+            // --- EKSİK ALANLAR (QML Hata Vermesin Diye) ---
+            map["number"] = "";
+            map["emails"] = QStringList(); // Rehberdeki emails dizisiyle aynı tipte boş dizi
+
+            // --- AVATAR ÖNBELLEK VE KONTROL MANTIĞI ---
+            QString localAvatarUrl = "";
+
+
+            if (avatarDb.isOpen()) {
+                QSqlQuery avatarQuery(avatarDb);
+                avatarQuery.prepare("SELECT localURL FROM chat_avatars WHERE chatID = ?");
+                avatarQuery.addBindValue(chatID);
+                if (avatarQuery.exec() && avatarQuery.next()) {
+                    localAvatarUrl = avatarQuery.value(0).toString();
+                    // URL aynıysa ve dosya diskte hâlâ duruyorsa tekrar indirme
+                    if (QFile::exists(localAvatarUrl)) {
+                        localAvatarUrl = "file://" + localAvatarUrl;
+                    }
+                }
+
+
+            }
+            qDebug() <<"localAvatarUrl: "<<localAvatarUrl;
+            map["avatarUrl"] = localAvatarUrl;         // Boş resim URL'si (default_avatar.png'ye düşer)
+
+            list << map;
+        }
+    } else {
+        qWarning() << "[DATABASE] getGroupsFromDb hatası:" << query.lastError().text();
+    }
+
+    // !!! KRİTİK KONTROL: DB'den gerçekten grup dönüyor mu?
+    qDebug() << "[DEBUG-GROUPS] accountID:" << accountID << " | Arama:" << searchQuery
+             << " | Bulunan Grup Sayısı:" << list.size();
+
+    return list;
+}
+
+
+QVariantList Database::getContactsFromDb(const QString &searchQuery, const QString &accountID) {
+    QVariantList list;
+
+    QSqlDatabase db = QSqlDatabase::database("contacts_db_conn");
+    if (!db.isOpen()) {
+        qWarning() << "[DATABASE] contacts_db_conn kapalı, açılmaya çalışılıyor...";
+        if (!db.open()) return list;
+    }
+
+    QString sql = "SELECT id, fullName, email, phoneNumber, accountID "
+                  "FROM contacts WHERE 1=1";
+
+    if (!accountID.isEmpty()) {
+        sql += " AND accountID = ?";
+    }
+
+    if (!searchQuery.isEmpty()) {
+        sql += " AND fullName LIKE ?";
+    }
+
+    QSqlQuery query(db);
+    query.prepare(sql);
+
+    int bindIdx = 0;
+    if (!accountID.isEmpty()) {
+        query.bindValue(bindIdx++, accountID);
+    }
+    if (!searchQuery.isEmpty()) {
+        query.bindValue(bindIdx++, "%" + searchQuery + "%");
+    }
+
+    QSqlDatabase avatarDb = QSqlDatabase::database("avatars_db_conn");
+
+    if (query.exec()) {
+        while (query.next()) {
+            QString contactID = query.value(0).toString();
+            QString cTitle = query.value(1).toString();
+            QString email = query.value(2).toString();
+            QString phoneNumber = query.value(3).toString();
+            QString network = query.value(4).toString();
+
+            // Varsa önbellekteki yerel avatarı kontrol et, yoksa API'den gelen URL'i kullan
+            QString finalAvatarUrl = "";
+            if (avatarDb.isOpen()) {
+                QSqlQuery avatarQuery(avatarDb);
+                avatarQuery.prepare("SELECT localURL FROM chat_avatars WHERE chatID = ?");
+                avatarQuery.addBindValue(contactID);
+                if (avatarQuery.exec() && avatarQuery.next()) {
+                    QString localUrl = avatarQuery.value(0).toString();
+                    if (!localUrl.isEmpty() && QFile::exists(localUrl)) {
+                        finalAvatarUrl = "file://" + localUrl;
+                    }
+                }
+            }
+
+
+
+            QVariantMap map;
+            map["id"] = contactID;
+            map["displayName"] = cTitle;
+            map["emails"] = QStringList() << email;
+            map["number"] = phoneNumber;
+            map["avatarUrl"] = finalAvatarUrl;
+            map["network"] = network;
+
+            list << map;
+        }
+    } else {
+        qWarning() << "[DATABASE] getContactsFromDb hatası:" << query.lastError().text();
+    }
+
+    qDebug() << "[DEBUG-CONTACTS] accountID:" << accountID << " | Arama:" << searchQuery
+             << " | Bulunan Contact Sayısı:" << list.size();
+
+    return list;
 }

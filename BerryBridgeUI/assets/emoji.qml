@@ -11,6 +11,7 @@ Page {
     
     titleBar: TitleBar {
         title: "Reactions"
+        scrollBehavior: TitleBarScrollBehavior.Sticky
         
         // 1. Sol taraftaki Eylem (Cancel)
         dismissAction: ActionItem {

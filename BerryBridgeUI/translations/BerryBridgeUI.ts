@@ -4,12 +4,12 @@
 <context>
     <name>Database</name>
     <message>
-        <location filename="../src/Database.cpp" line="1356"/>
+        <location filename="../src/Database.cpp" line="1411"/>
         <source>Today</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../src/Database.cpp" line="1358"/>
+        <location filename="../src/Database.cpp" line="1413"/>
         <source>Yesterday</source>
         <translation type="unfinished"></translation>
     </message>
@@ -17,7 +17,7 @@
 <context>
     <name>about</name>
     <message>
-        <location filename="../assets/about.qml" line="118"/>
+        <location filename="../assets/about.qml" line="119"/>
         <source>Report Bugs</source>
         <translation type="unfinished"></translation>
     </message>

@@ -48,6 +48,7 @@ Page {
     property string chatBgColor: app.colors.chatBg
     property string bubbleColor: app.colors.outgoing
     property variant datObject :dat
+    property variant appObject :app
     property alias chatPage:chatPage
     property alias eCont: editCont
     property alias eLabel: editLabel
@@ -55,6 +56,114 @@ Page {
     property bool isEditing: false
     property string editMsgID:""
     property alias atButton: attachButton
+    
+    property bool isDark: app.darkMode // follows Settings > Dark Mode live
+    property bool disableTrackpadFocus
+    // A WhatsApp one-to-one chat: the title bar shows the call button.
+    property bool canCall: false
+    property string avatarUrl
+    property string avatarInitial
+    property string avatarColor
+    
+    property variant categorizedEmojis: {
+        "Smileys & People": [
+        "😀", "😁", "😂", "😃", "😄", "😅", "😆", "😉", "😊", "😋", "😎", 
+        "😍", "😘", "😗", "😙", "😚", "☺", "😐", "😑", "😶", "😏", "😣", 
+        "😥", "😮", "😯", "😪", "😫", "😴", "😌", "😛", "😜", "😝", "😒", 
+        "😓", "😔", "😕", "😲", "👍", "👎", "👌", "✌", "👈", "👉", "👆", 
+        "👇", "☝", "✋", "👋", "👏", "🙌", "🙏", "😇", "😈",
+        "😵", "💪,👂", "👃", " 👀", "👄", "💋", "👤", "👥",
+        "👶", "👧", "👦", "👩", "👨", "👵", "👴", "👲", "👳", "👮"
+        ],
+        "Animals & Nature": [
+        "🔥", "🐶", "🐱", "🐭", "🐹", "🐰", "🐻", "🐼", "🐨",
+        "🐯", "🐮", "🐷", "🐸", "🐵", "🐔", "🐧", "🐦", "🐤",
+        "🐣", "🐥", "🐺", "🐗", "🐴",
+        "🐝", "🐛", "🐌", "🐞", "🐜",
+        "🐢", "🐍", "🐙", "🐡", "🐠",
+        "🐟", "🐬", "🐊", "🐅", "🐆", "🐘",
+        "🐪", "🐫", "🐃", "🐄", "🐎", "🐖", "🐏", "🐑",
+        "🐐", "🐕", "🐩", "🐈", "🐓", "🌲", "🌳", "🌴",
+        "🌵", "🌽", "🌿", "🌸", "💮", "🌹", "🌺", "🌻", "🌼", "🌷", "💐", 
+        "☘", "🍀", "🍁", "🍂", "🍄"
+        ],
+        "Food & Drink": [
+        "🍏","🍎","🍐","🍊","🍋","🍌","🍉","🍇","🍓","🍈",
+        "🍒","🍑","🍍","🍅","🍆",
+        "🌽","🍠","🍞","🍖","🍗","🍔","🍟","🍕",
+        "🍳","🍲","🍱","🍘","🍙","🍚","🍛","🍜","🍝","🍠","🍢","🍣",
+        "🍤","🍥","🍡","🍦","🍧","🍨","🍩","🍪","🎂","🍰",
+        "🍫","🍬","🍭","🍮","🍯","🍼","☕","🍵","🍶",
+        "🍷","🍸","🍹","🍺","🍻","🍴","🔪"
+        ],
+        "Activity": [
+        "⚽", "🏀", "🏈", "⚾", "🎾",
+        "🏉", "🎱",
+        "⛳", "🎣",
+        "🎿", "⛷", "🏂",
+         "🏇", "🏄", "🏊", "🚣",
+         "🚴", "🚵", "🏆",
+         "🎫", "🎪", "🎭", "🎨",
+         "🎬", "🎤", "🎧", "🎼", "🎹", "🎷",
+         "🎺", "🎸", "🎻", "🎲", "♟", "🎯",
+         "🎳", "🎮", "🎰",
+         "🃏", "🀄", "🎴"
+         ],
+        "Travel & Places": [
+        "🚗","🚕","🚙","🚌","🚎","🚓","🚑","🚒","🚐",
+        "🚚","🚛","🚜","🚲","🚨","🚔","🚍",
+        "🚘","🚖","🚡","🚠","🚟","🚃","🚋","🚞","🚝","🚄",
+        "🚅","🚈","🚂","🚆","🚇","🚊","🚉","✈",
+            "💺","🚀","🚁","⛵","🚤",
+            "🚢","⚓","🚧","⛽","🚏","🚦","🚥","🏁",
+            "🏰","🏯","🗽","⛲","⛺","🌁","🌃","🌄",
+            "🌅","🌆","🌉","♨","🌌","🎠","🎡","🎢","💈","🎪"
+        ],
+        "Objects": [
+        "💻","⌨","💽","💾","💿","📀",
+        "📼","📷","📹","🎥","📞","☎","📟","📠",
+        "📺","📻","⏰","⌚","⌛",
+        "⏳","📡","🔋","🔌","💡","🔦","💰","💴",
+        "💵","💶","💷","💸","💳","📈","📉","📊","📋",
+            "📌","📍","📎","📏","📐","✂","🔒","🔓","🔏","🔐","🔑"
+        ],
+        "Symbols": [
+        "❤","💛","💚","💙","💜","💔", 
+        "❣","💕","💞","💓","💗","💖","💘","💌","💋","💯", 
+        "💢","💥","💫","💦","💨","💬", 
+        "💭","💤","🏧","🚾","♿","🅿","🈳","🈴","🈲","🈸", 
+        "🈹","🈺","🉐","🉑","🌀","🔂","🔁","🔀","▶","⏩", 
+        "◀","⏪","🔼","🔽", 
+        "⏏","🎦","🔅","🔆","📶","📳","📴","♀","♂","⚕", 
+        "♾","♻","⚜","🔱","📛","🔰","⭕","✅","☑","✔", 
+        "✖","❌","❎","➕","➖","➗","➰","➿","〽","✳", 
+        "✴","❇","💱","💲","©","®","™"
+        ],
+        "Flags": [
+        "🏁", "🚩", "🎌",
+        "🇹🇷", "🇦🇷", "🇦🇺",
+        "🇦🇹", "🇦🇿", "🇧🇪", "🇧🇷", "🇧🇬", "🇨🇦", "🇨🇱",
+        "🇨🇳", "🇨🇴", "🇭🇷", "🇨🇺", "🇨🇿", "🇩🇰", "🇩🇯",
+        "🇪🇬", "🇪🇸", "🇫🇷", "🇩🇪", "🇬🇷", "🇭🇺", "🇮🇳",
+        "🇮🇪", "🇮🇩", "🇮🇷", "🇮🇶", "🇮🇹", "🇯🇵", "🇯🇴",
+        "🇰🇼", "🇱🇧", "🇲🇾", "🇲🇽", "🇲🇦", "🇳🇱", "🇳🇿",
+        "🇳🇴", "🇵🇰", "🇵🇸", "🇵🇪", "🇵🇱", "🇵🇹", "🇶🇦",
+        "🇷🇴", "🇷🇺", "🇷🇸", "🇸🇦", "🇸🇬", "🇿🇦", "🇰🇷",
+        "🇸🇪", "🇨🇭", "🇸🇾", "🇹🇼", "🇹🇭", "🇹🇳", 
+        "🇺🇦", "🇬🇧", "🇺🇸", "🇻🇪", "🇻🇳"
+        ]
+    }
+    
+    property variant categoryOrder: [
+    "Smileys & People",
+    "Animals & Nature",
+    "Food & Drink",
+    "Activity",
+    "Travel & Places",
+    "Objects",
+    "Symbols",
+    "Flags"
+    ]
     
     resizeBehavior: PageResizeBehavior.Resize
     
@@ -476,6 +585,15 @@ Page {
                 break;
             }
         }
+        
+        for (var i = 0; i < messageModel.size(); i++) {
+            var item = messageModel.value(i);
+            if (item.linkedMessageID === messageId) {
+                // Update item with localImagePath
+                item.mentionImgLocalUrl = localPath;
+                messageModel.replace(i, item);
+            }
+        }
     }
     
     function handleDownloadProgress(messageId, progress) {
@@ -502,22 +620,152 @@ Page {
         voicePlayer.stop();
     }
     
-    titleBar: TitleBar {
-        id: chatTitleBar
-        title: chatPage.chatTitle
-        scrollBehavior: TitleBarScrollBehavior.Sticky
+    function loadAllEmojis() {
+        emojiPickerModel.clear(); // Önce modeli temizleyelim
+        
+        // Tanımladığımız sırayı (categoryOrder) döngüye sokuyoruz
+        for (var c = 0; c < categoryOrder.length; c++) {
+            var catName = categoryOrder[c];
+            var emojiList = categorizedEmojis[catName];
+            
+            if (emojiList) {
+                for (var i = 0; i < emojiList.length; i++) {
+                    emojiPickerModel.append({ "category": catName, "emoji": emojiList[i] });
+                }
+            }
+        }
     }
 
-    // WhatsApp one-to-one chats get "Chiama" (callClient, WaCalls gateway);
-    // set once accountID/chatType are known (see loadMessages).
+    // WhatsApp one-to-one chats get a call button (callClient, WaCalls gateway);
+    // set once accountID/chatType are known (see loadMessages). It sits in the
+    // free-form title bar, which shows no acceptAction.
     function setupCallAction() {
-        if (chatTitleBar.acceptAction) return;
-        if (chatPage.chatType == "single" && callClient.isWhatsAppAccount(chatPage.accountID)) {
-            chatTitleBar.acceptAction = callAction;
+        canCall = chatPage.chatType == "single" && callClient.isWhatsAppAccount(chatPage.accountID);
+    }
+
+    function startWhatsAppCall() {
+        var phone = callClient.phoneForChat(chatPage.chatID);
+        if (phone.length == 0) {
+            voiceToast.body = "Numero di telefono non disponibile per questa chat";
+            voiceToast.show();
+        } else if (callClient.link != "open") {
+            voiceToast.body = "Server chiamate non collegato (" + callClient.link + ")";
+            voiceToast.show();
+        } else {
+            callClient.startCall(phone, chatPage.chatTitle);
         }
     }
     
+    // Belirli bir kategoriye göre filtreleme yapmak isterseniz:
+    function filterByCategory(categoryName) {
+        emojiPickerModel.clear();
+        var emojiList = categorizedEmojis[categoryName];
+        if (emojiList) {
+            for (var i = 0; i < emojiList.length; i++) {
+                emojiPickerModel.append({ "category": categoryName, "emoji": emojiList[i] });
+            }
+        }
+    }
+  
+    titleBar: TitleBar {
+        kind: TitleBarKind.FreeForm
+        scrollBehavior: TitleBarScrollBehavior.Sticky
+        kindProperties: FreeFormTitleBarKindProperties {
+            Container {
+                layout: StackLayout { orientation: LayoutOrientation.LeftToRight }
+                leftPadding: ui.sdu(2.0)
+                rightPadding: ui.sdu(2.0)
+                topMargin: ui.sdu(0.8)
+                bottomMargin: ui.sdu(0.8)
+                verticalAlignment: VerticalAlignment.Fill
+                Container {
+                    visible: !isSearchMode
+                    // Profil resmi arka planı primary color olsun
+                    background: Color.create(avatarColor)
+                    minWidth: ui.sdu(8.0)
+                    preferredWidth: ui.sdu(8.0)
+                    layout: DockLayout {}
+                    verticalAlignment: VerticalAlignment.Center
+                    // Sadece avatar yoksa harf gösterilsin
+                    Label {
+                        visible: chatType == "single" && (!avatarUrl || avatarUrl === "")
+                        text: avatarInitial
+                        textStyle.color: Color.White
+                        textStyle.fontSize: FontSize.Large
+                        horizontalAlignment: HorizontalAlignment.Center
+                        verticalAlignment: VerticalAlignment.Center
+                    }
+                    
+                    // Sadece avatar yoksa kanal ikonu gösterilsin
+                    ImageView {
+                        visible: chatType == "channel" && (!avatarUrl || avatarUrl === "")
+                        imageSource: "asset:///images/channel.png"
+                        horizontalAlignment: HorizontalAlignment.Center
+                        verticalAlignment: VerticalAlignment.Center
+                        preferredHeight:ui.sdu(6.0)                 
+                        scalingMethod:ScalingMethod.AspectFit
+                    }
+                    
+                    // Sadece avatar yoksa grup ikonu gösterilsin
+                    ImageView {
+                        visible: chatType == "group" && (!avatarUrl || avatarUrl === "")
+                        imageSource: "asset:///images/ic_group_white.png"                  
+                        scalingMethod:ScalingMethod.AspectFit
+                        horizontalAlignment: HorizontalAlignment.Center
+                        verticalAlignment: VerticalAlignment.Center
+                        preferredHeight:ui.sdu(6.0)
+                    }
+                    
+                    // İndirilen gerçek avatar resmi (Varsa en üstte bu görünür)
+                    ImageView {
+                        visible: avatarUrl !== "" && avatarUrl !== undefined
+                        imageSource: avatarUrl
+                        horizontalAlignment: HorizontalAlignment.Center
+                        verticalAlignment: VerticalAlignment.Center                   
+                        scalingMethod:ScalingMethod.AspectFit
+                        minWidth: ui.sdu(8.0)
+                        preferredWidth: ui.sdu(8.0)
+                    }
+                    
+                    // Çerçeve / maske katmanı
+                    ImageView {
+                        id: circle
+                        imageSource: "asset:///images/wPro.png"
+                        horizontalAlignment: HorizontalAlignment.Center
+                        verticalAlignment: VerticalAlignment.Center
+                        filterColor: isDark ? Color.create("#282828"):Color.create("#f0f0f0")
+                        scalingMethod:ScalingMethod.AspectFit
+                        minWidth: ui.sdu(8.0)
+                        preferredWidth: ui.sdu(8.0)
+                    }
+                }
+                
+                Label {
+                text: chatPage.chatTitle
+                verticalAlignment: VerticalAlignment.Center
+                horizontalAlignment: HorizontalAlignment.Left
+                textStyle.fontWeight: FontWeight.W500
+                textStyle.fontSize: FontSize.Large
+                layoutProperties: StackLayoutProperties { spaceQuota: 1.0 }
+                }
+
+                // "Chiama" (see setupCallAction).
+                Label {
+                    visible: chatPage.canCall && !isSearchMode
+                    text: "☎"
+                    verticalAlignment: VerticalAlignment.Center
+                    textStyle.fontSize: FontSize.XLarge
+                    onTouch: {
+                        if (event.isUp()) chatPage.startWhatsAppCall();
+                    }
+                }
+
+            }
+        }
+        }
+    
     onCreationCompleted: {
+        disableTrackpadFocus = app.disableTrackpadFocus
         app.dbUpdateTriggerChanged.connect(chatPage.handleDbUpdate);
         dat.imageDownloaded.connect(chatPage.handleImageDownloaded);
         voiceRecorder.finished.connect(chatPage.sendVoice);
@@ -528,18 +776,7 @@ Page {
         //loadMessages();
         listView.requestFocus();
         
-        var supportedEmojis = [
-        "😀", "😁", "😂", "😃", "😄", "😅", "😆", "😉", "😊", "😋", "😎", 
-        "😍", "😘", "😗", "😙", "😚", "☺", "😐", 
-        "😑", "😶", "😏", "😣", "😥", "😮",  "😯", "😪", "😫", "😴", 
-        "😌", "😛", "😜", "😝", "😒", "😓", "😔", "😕", "😲", 
-        "👍", "👎", "👌", "✌", "👈", "👉", "👆", "👇", 
-        "☝", "✋", "👋", "👏", "🙌", "🙏", "❤", "🔥"
-        ];
-        
-        for (var i = 0; i < supportedEmojis.length; i++) {
-            emojiPickerModel.append(supportedEmojis[i]);
-        }
+        loadAllEmojis();
     }
     
     Container {
@@ -547,7 +784,7 @@ Page {
         layout: DockLayout {}
         horizontalAlignment: HorizontalAlignment.Fill
         verticalAlignment: VerticalAlignment.Fill
-        background: Color.create(chatPage.chatBgColor)
+        background: isDark ? undefined: Color.create(chatPage.chatBgColor)
         
         /*ImageView {
          imageSource: "asset:///images/ChatBack.jpg"
@@ -654,6 +891,9 @@ Page {
                         type: "header"
                         // Ana konteyner ekranın tamamına yayılır
                         Container {
+                            id: headerCont
+                            property variant listView: ListItem.view
+                            navigation.focusPolicy: NavigationFocusPolicy.NotFocusable
                             horizontalAlignment: HorizontalAlignment.Fill
                             topPadding: ui.du(2.5)
                             bottomPadding: ui.du(2.5)
@@ -698,10 +938,10 @@ Page {
                     },
                     
                     ListItemComponent {
-                        type: "message"
-                        
+                        type: "message"                        
                         Container {
                             id: rootMessageItem
+                            navigation.focusPolicy: rootMessageItem.listView.rootPage.disableTrackpadFocus ? NavigationFocusPolicy.NotFocusable : NavigationFocusPolicy.Default
                             // En dış seviyede ListView referansını sabitliyoruz
                             property variant listView: ListItem.view
                             property string chatType: listView ? listView.chatType : ""
@@ -729,7 +969,7 @@ Page {
                                             onClicked: {
                                                 rootMessageItem.listView.rootPage.loadMoreMessages();
                                             }
-                                            color: Color.create("#ff282828")
+                                            color: Color.create("#282828")
                                         }
                                         
                                         // Sağ tarafı dolduran esnek boşluk
@@ -743,9 +983,84 @@ Page {
                             // Normal Mesaj Görünümü
                             Container {
                                 visible: !ListItemData.isLoadMore
+                                navigation.focusPolicy: rootMessageItem.listView.rootPage.disableTrackpadFocus ? NavigationFocusPolicy.NotFocusable : NavigationFocusPolicy.Default
                                 Container {
                                     id: msgContainer
+                                    navigation.focusPolicy: rootMessageItem.listView.rootPage.disableTrackpadFocus ? NavigationFocusPolicy.NotFocusable : NavigationFocusPolicy.Default
                                     property string chatType: rootMessageItem.listView.chatType
+                                    property real startX: 0
+                                    
+                                    animations: [
+                                        TranslateTransition {
+                                            id: resetAnim
+                                            target: msgContainer
+                                            toX: 0.0
+                                            duration: 250
+                                        }
+                                    ]
+                                    
+                                    onTouch: {
+                                        if (event.touchType == TouchType.Down) {
+                                            resetAnim.stop();
+                                            // screenX yerine Cascades'in desteklediği localX kullanıyoruz
+                                            startX = event.localX;
+                                        } 
+                                        else if (event.touchType == TouchType.Move) {
+                                            var deltaX = event.localX - startX;
+                                            
+                                            // Sadece sola doğru çekmeye izin verelim (negatif değerler)
+                                            if (deltaX < 0) {
+                                                msgContainer.translationX = deltaX;
+                                            } else {
+                                                msgContainer.translationX = 0;
+                                            }
+                                        } 
+                                        else if (event.touchType == TouchType.Up || event.touchType == TouchType.Cancel) {
+                                            if (msgContainer.translationX < -ui.sdu(10.0) && !rootMessageItem.listView.rootPage.readOnly) {
+                                                var cLV = rootMessageItem.listView;                                            
+                                                cLV.rootPage.replyToMessageID=ListItemData.id;
+                                                var rText = ListItemData.text;
+                                                
+                                                cLV.rootPage.replySender=ListItemData.isSender ? "You":ListItemData.senderName
+                                                cLV.rootPage.isReplying=true;
+                                                if(ListItemData.type==="IMAGE"){
+                                                    var ratio=ListItemData.size ? ListItemData.size.height/ListItemData.size.width:1
+                                                    cLV.rootPage.replyAttachWidth=rootMessageItem.listView.displayWidth * 0.1;
+                                                    cLV.rootPage.replyAttachHeight=cLV.rootPage.replyAttachWidth*ratio
+                                                    cLV.rootPage.replyAttachVisible=true
+                                                    cLV.rootPage.replyAttachRatio=ratio
+                                                    if(ListItemData.localImagePath){
+                                                        cLV.rootPage.replyAttachImgUrl=ListItemData.localImagePath
+                                                    }else{
+                                                        cLV.rootPage.replyAttachImgUrl="asset:///images/ic_view_image.png"
+                                                    }                                                                     
+                                                }else if(ListItemData.type==="VIDEO"){                                               
+                                                    rText = "🎥 Video "+rText;
+                                                } else if (ListItemData.type==="AUDIO" || ListItemData.type==="VOICE") {
+                                                    rText = "🔉 Audio "+rText;
+                                                } else if (ListItemData.type==="FILE") {
+                                                    if(rText===""){
+                                                        rText = "📄  "+ListItemData.fileName;
+                                                    }else{
+                                                        rText = "📄  "+ListItemData.fileName+" : "+rText;
+                                                    }
+                                                
+                                                }  else if (ListItemData.type==="LOCATION") {
+                                                    rText = "📍 Location "+rText;
+                                                } else if (ListItemData.type==="STICKER") {
+                                                    rText = "🌞 Sticker "+rText;
+                                                }
+                                                cLV.rootPage.replyMessage=rText;
+                                                cLV.rootPage.iField.requestFocus();
+                                            }
+                                            
+                                            // Bırakınca orijinal yerine akıcı şekilde dön
+                                            resetAnim.fromX = msgContainer.translationX;
+                                            resetAnim.toX = 0.0;
+                                            resetAnim.play();
+                                        }
+                                    }
+                                    
                                     contextActions: [
                                         ActionSet {
                                             title: "Message Options"
@@ -764,9 +1079,10 @@ Page {
                                             
                                             ActionItem {
                                                 property string upperType: ListItemData.type ? ListItemData.type.toString().toUpperCase() : ""
+                                                property bool isSearch: rootMessageItem.listView.rootPage.isSearchMode
                                                 title: "Edit"
                                                 imageSource:"asset:///images/ic_edit.png"
-                                                enabled:ListItemData.isSender && ListItemData.type.toString().toUpperCase()=="TEXT"
+                                                enabled:!isSearch && ListItemData.isSender && ListItemData.type.toString().toUpperCase()=="TEXT"
                                                 onTriggered: {
                                                     var cLV = rootMessageItem.listView;
                                                     cLV.opacity=0.1;
@@ -786,7 +1102,8 @@ Page {
                                                 title: "Reply"
                                                 imageSource:"asset:///images/ic_reply.png"
                                                 property bool canReply: rootMessageItem.listView.rootPage.readOnly
-                                                enabled: !canReply
+                                                property bool isSearch: rootMessageItem.listView.rootPage.isSearchMode
+                                                enabled: !isSearch && !canReply
                                                 
                                                 onTriggered: {
                                                     var cLV = rootMessageItem.listView;                                            
@@ -823,6 +1140,7 @@ Page {
                                                         rText = "🌞 Sticker "+rText;
                                                     }
                                                     cLV.rootPage.replyMessage=rText;
+                                                    cLV.rootPage.iField.requestFocus();
                                                 
                                                 }
                                             }
@@ -832,11 +1150,12 @@ Page {
                                                 // (ListItemData.myReaction veritabanından gelen kendi emojinizdir, örn: "👍")
                                                 property string userReaction: (ListItemData && ListItemData.myReaction) ? ListItemData.myReaction : ""
                                                 property bool canReact: rootMessageItem.listView.rootPage.readOnly
+                                                property bool isSearch: rootMessageItem.listView.rootPage.isSearchMode
                                                 
                                                 // 2. DİNAMİK BAŞLIK VE İKON
                                                 title: userReaction !== "" ? "Remove " + userReaction : "React"
-                                                imageSource: userReaction !== "" ? "asset:///images/ic_cancel.png" : "asset:///images/ic_emoji.png"
-                                                enabled: !canReact
+                                                imageSource: userReaction !== "" ? "asset:///images/ic_cancel.png" : "asset:///images/smile.png"
+                                                enabled: !isSearch && !canReact
                                                 
                                                 // 3. DİNAMİK TETİKLENME (Tıklandığında Ne Yapılacak?)
                                                 onTriggered: {
@@ -966,7 +1285,6 @@ Page {
                                                     id: mentionSender
                                                     // C++'tan gelen veriyi doğrudan okuyoruz
                                                     text: ListItemData.mentionSenderName !== undefined ? ListItemData.mentionSenderName : "Bilinmeyen"
-                                                    //textStyle.color: Color.create("#075E54")
                                                     textStyle.fontSize: FontSize.XSmall
                                                     textStyle.fontWeight: FontWeight.Bold
                                                     bottomMargin: 0
@@ -1186,6 +1504,7 @@ Page {
                                                             horizontalAlignment: HorizontalAlignment.Left
                                                             multiline: true
                                                             autoSize.maxLineCount: 2
+                                                            
                                                         }
                                                         ProgressIndicator {
                                                             visible: rootMessageItem.listView.voiceActiveId === ListItemData.id && rootMessageItem.listView.voiceDuration > 0
@@ -1317,6 +1636,7 @@ Page {
                                                             horizontalAlignment: HorizontalAlignment.Left
                                                             multiline: true
                                                             autoSize.maxLineCount: 2
+                                                            
                                                         }
                                                         Label {
                                                             text:ListItemData.extension ? ListItemData.fileSizeStr+" • "+ListItemData.extension.substring(1).toUpperCase():""
@@ -1368,8 +1688,7 @@ Page {
                                             Label {
                                                 text: ListItemData.text
                                                 multiline: true
-                                                textStyle.fontSize: FontSize.Medium
-                                                textFormat: TextFormat.Html
+                                                textStyle.fontSize: ListItemData.text.replace(/<[^>]*>/g, '').length < 3 ? FontSize.XLarge : FontSize.Medium;                                                textFormat: TextFormat.Html
                                                 topMargin: 0;
                                                 bottomMargin: 0;
                                                 textStyle.color: Color.create(app.colors.text)
@@ -1382,21 +1701,8 @@ Page {
                                             topMargin: ui.du(0.5)
                                             
                                             layout: DockLayout {}
-                                            
-                                            /*// 1. ÖZEL PROPERTY TANIMI (Cascades bunun için otomatik geçerli bir sinyal oluşturur)
-                                             property string currentReactions: (ListItemData && ListItemData.reactionsText) ? ListItemData.reactionsText : ""
-                                             
-                                             // 2. GEÇERLİ SİNYAL: Property her değiştiğinde tetiklenir
-                                             onCurrentReactionsChanged: {
-                                             if (currentReactions !== "") {
-                                             console.log("=== [REACTION QML DEBUG] ===");
-                                             console.log("  -> Msg ID:", ListItemData.id);
-                                             console.log("  -> Emojis:", currentReactions);
-                                             }
-                                             }*/
-
-// 1. GENİŞLİK HESAPLAYICI (Görünmez Yapı)
-Container {
+                                            // 1. GENİŞLİK HESAPLAYICI (Görünmez Yapı)
+                                            Container {
                                                 opacity: 0.0
                                                 preferredHeight: 0.0
                                                 
@@ -1484,7 +1790,7 @@ Label {
                     Button {
                         preferredWidth: ui.du(8.0)
                         text: "✖"
-                        color: Color.create("#ff282828")
+                        color: Color.create("#282828")
                         onClicked: {
                             isEditing=false
                             editCont.visible=false
@@ -1553,7 +1859,7 @@ Label {
             Container {
                 id: bottomBar
                 visible: (!chatPage.isSearchMode && !readOnly && !chatPage.voiceActive)
-                background: Color.create("#ff282828")
+                background: isDark? Color.create("#282828"):Color.create("#f0f0f0")
                 
                 layout: StackLayout { orientation: LayoutOrientation.LeftToRight }
                 leftPadding: ui.du(1.0); rightPadding: ui.du(1.5); topPadding: ui.du(1.0); bottomPadding: ui.du(1.0)
@@ -1572,7 +1878,7 @@ Label {
                 // 1. Emoji Button
                 ImageButton {
                     // Çekmece açıksa klavye ikonuna, kapalıysa emoji ikonuna dönüştür
-                    defaultImageSource: chatPage.isEmojiPickerVisible ? "asset:///images/ic_keyboard.png" : "asset:///images/ic_emoji.png"
+                    defaultImageSource: chatPage.isEmojiPickerVisible ? isDark?"asset:///images/ic_keyboard.png":"asset:///images/ic_keyboard_dark.png" : isDark?"asset:///images/emoji.png":"asset:///images/emoji_dark.png"
                     verticalAlignment: VerticalAlignment.Center
                     preferredWidth: ui.du(8.0)
                     preferredHeight: ui.du(8.0)
@@ -1587,6 +1893,7 @@ Label {
                             inputField.requestFocus();
                         }
                     }
+                    navigation.defaultHighlightEnabled: !disableTrackpadFocus
                 }
                 
                 Container {
@@ -1612,7 +1919,7 @@ Label {
                         Container {
                             layout: StackLayout { orientation: LayoutOrientation.LeftToRight}
                             rightPadding: ui.du(1.0)
-                            background: Color.create("#E0E0E0")
+                            background: isDark?Color.create("#282828"):Color.create("#f0f0f0")
                             Container {                            
                                 preferredWidth:ui.du(1.0)
                                 minWidth:ui.du(1.0)
@@ -1738,7 +2045,7 @@ Label {
                                 //visible:(ListItemData.localImagePath === undefined || ListItemData.localImagePath === "")
                                 horizontalAlignment: HorizontalAlignment.Fill
                                 verticalAlignment: VerticalAlignment.Fill
-                                background: Color.create("#E0E0E0")
+                                background: isDark?Color.create("#282828"):Color.create("#f0f0f0")
                                 leftPadding: ui.du(1.0)
                                 rightPadding: ui.du(1.0)
                                 topPadding: ui.du(0.5)
@@ -1888,7 +2195,7 @@ Label {
                 ImageButton {
                     id:attachButton
                     visible:true
-                    defaultImageSource: "asset:///images/ic_attach.png"
+                    defaultImageSource: isDark? "asset:///images/ic_attach.png":"asset:///images/ic_attach_dark.png"
                     verticalAlignment: VerticalAlignment.Center
                     preferredWidth: ui.du(7.0)
                     preferredHeight: ui.du(7.0)
@@ -1900,13 +2207,16 @@ Label {
                         attachmentPage.chatID = chatPage.chatID;
                         navigationPane.push(attachmentPage);
                     }
+                    navigation.defaultHighlightEnabled: !disableTrackpadFocus
                 }
                 
                 // 4. Send/Voice Button
                 ImageButton {
                     id: sendButton
                     //defaultImageSource: sendButtonUrl
-                    defaultImageSource: (chatPage.inputEmpty && !attachSending && !isEditing) ? "asset:///images/ic_microphone.png" : "asset:///images/ic_send.png"
+                    // Empty input: the mic (voice message). The send icon follows the theme.
+                    defaultImageSource: (chatPage.inputEmpty && !attachSending && !isEditing) ? "asset:///images/ic_microphone.png"
+                        : (isDark ? "asset:///images/ic_send.png" : "asset:///images/ic_send_dark.png")
                     verticalAlignment: VerticalAlignment.Center
                     preferredWidth: ui.du(8.0)
                     preferredHeight: ui.du(8.0)
@@ -1994,6 +2304,7 @@ Label {
                             dat.editMessage(chatID, editMsgID, outgoingMsg);
                         }
                     }
+                    navigation.defaultHighlightEnabled: !disableTrackpadFocus
                 }
             }
             
@@ -2004,10 +2315,11 @@ Label {
                 visible: chatPage.isEmojiPickerVisible
                 horizontalAlignment: HorizontalAlignment.Fill
                 // Native klavyenin yaklaşık kapladığı alan boyutunda sabit bir yükseklik
-                preferredHeight: ui.du(38.0)
+                preferredHeight: ui.sdu(43.0)
                 background: Color.create(app.colors.chatBg)
                 
-                layout: DockLayout {
+                layout: StackLayout {
+                    orientation: LayoutOrientation.TopToBottom
                 }
                 
                 ListView {
@@ -2037,7 +2349,7 @@ Label {
                                 background: ListItem.selected || ListItem.active ? Color.create(app.colors.selection) : Color.Transparent
                                 
                                 Label {
-                                    text: ListItemData
+                                    text: ListItemData.emoji
                                     textStyle.fontSize: FontSize.XLarge
                                     horizontalAlignment: HorizontalAlignment.Center
                                     verticalAlignment: VerticalAlignment.Center
@@ -2049,10 +2361,213 @@ Label {
                     onTriggered: {
                         var selectedEmoji = dataModel.data(indexPath);
                         // Seçilen emojiyi inputField içerisindeki mevcut metnin sonuna ekle
-                        inputField.text = inputField.text + selectedEmoji;
+                        inputField.text = inputField.text + selectedEmoji.emoji;
+                    }
+                }
+                
+                Container {
+                    layout: StackLayout {
+                        orientation: LayoutOrientation.LeftToRight
+                    }
+                    id: categoryBar
+                    property string activeCategory
+                    background: isDark ? Color.create("#282828"):Color.create("#f0f0f0")
+                    bottomPadding: ui.sdu(1.0)
+                    topPadding: ui.sdu(1.0)
+                    leftPadding: ui.sdu(2.0)
+                    rightPadding: ui.sdu(2.0)
+                    // 1. Smileys & People
+                    Container {
+                        layoutProperties: StackLayoutProperties { spaceQuota: 1 }
+                        layout: DockLayout {}
+                        preferredHeight: ui.sdu(7.0)
+                        
+                        // Eğer aktif kategori buysa farklı, değilse şeffaf arka plan
+                        //background: categoryBar.activeCategory === "Smileys & People" ? Color.create("#454545") : Color.Transparent
+                        
+                        ImageView {
+                            imageSource: "asset:///images/smile.png"
+                            horizontalAlignment: HorizontalAlignment.Center
+                            verticalAlignment: VerticalAlignment.Center
+                            filterColor: categoryBar.activeCategory === "Smileys & People" ? Color.create(primaryColor) : isDark ? undefined : Color.create("#282828")
+                            scalingMethod: ScalingMethod.AspectFit
+                            onTouch: {
+                                if (event.touchType == TouchType.Up) {
+                                    categoryBar.activeCategory = "Smileys & People";
+                                    filterByCategory("Smileys & People");
+                                }
+                            }
+                        }
+                        
+                        
+                    }
+                    
+                    // 2. Animals & Nature
+                    Container {
+                        layoutProperties: StackLayoutProperties { spaceQuota: 1 }
+                        layout: DockLayout {}
+                        preferredHeight: ui.sdu(7.0)
+                        
+                        //background: categoryBar.activeCategory === "Animals & Nature" ? Color.create("#454545") : Color.Transparent
+                        
+                        ImageView {
+                            imageSource: "asset:///images/nature.png"
+                            horizontalAlignment: HorizontalAlignment.Center
+                            verticalAlignment: VerticalAlignment.Center
+                            filterColor: categoryBar.activeCategory === "Animals & Nature" ? Color.create(primaryColor) : isDark ? undefined : Color.create("#282828")
+                            scalingMethod: ScalingMethod.AspectFit
+                            onTouch: {
+                                if (event.touchType == TouchType.Up) {
+                                    categoryBar.activeCategory = "Animals & Nature";
+                                    filterByCategory("Animals & Nature");
+                                }
+                            }
+                        }
+                    }
+                    
+                    // 3. Food & Drink
+                    Container {
+                        layoutProperties: StackLayoutProperties { spaceQuota: 1 }
+                        layout: DockLayout {}
+                        preferredHeight: ui.sdu(7.0)
+                        
+                        //background: categoryBar.activeCategory === "Food & Drink" ? Color.create("#454545") : Color.Transparent
+                        
+                        ImageView {
+                            imageSource: "asset:///images/food.png"
+                            horizontalAlignment: HorizontalAlignment.Center
+                            verticalAlignment: VerticalAlignment.Center
+                            filterColor: categoryBar.activeCategory === "Food & Drink" ? Color.create(primaryColor) : isDark ? undefined : Color.create("#282828")
+                            scalingMethod: ScalingMethod.AspectFit
+                            onTouch: {
+                                if (event.touchType == TouchType.Up) {
+                                    categoryBar.activeCategory = "Food & Drink";
+                                    filterByCategory("Food & Drink");
+                                }
+                            }
+                        }
+                    }
+                    
+                    // 4. Activity
+                    Container {
+                        layoutProperties: StackLayoutProperties { spaceQuota: 1 }
+                        layout: DockLayout {}
+                        preferredHeight: ui.sdu(7.0)
+                        
+                        //background: categoryBar.activeCategory === "Activity" ? Color.create("#454545") : Color.Transparent
+                        
+                        ImageView {
+                            imageSource: "asset:///images/activity.png"
+                            horizontalAlignment: HorizontalAlignment.Center
+                            verticalAlignment: VerticalAlignment.Center
+                            filterColor: categoryBar.activeCategory === "Activity" ? Color.create(primaryColor) : isDark ? undefined : Color.create("#282828")
+                            scalingMethod: ScalingMethod.AspectFit
+                            onTouch: {
+                                if (event.touchType == TouchType.Up) {
+                                    categoryBar.activeCategory = "Activity";
+                                    filterByCategory("Activity");
+                                }
+                            }
+                        }
+                    }
+                    
+                    // 5. Travel & Places
+                    Container {
+                        layoutProperties: StackLayoutProperties { spaceQuota: 1 }
+                        layout: DockLayout {}
+                        preferredHeight: ui.sdu(7.0)
+                        
+                        //background: categoryBar.activeCategory === "Travel & Places" ? Color.create("#454545") : Color.Transparent
+                        
+                        ImageView {
+                            imageSource: "asset:///images/travel.png"
+                            horizontalAlignment: HorizontalAlignment.Center
+                            verticalAlignment: VerticalAlignment.Center
+                            filterColor: categoryBar.activeCategory === "Travel & Places" ? Color.create(primaryColor) : isDark ? undefined : Color.create("#282828")
+                            scalingMethod: ScalingMethod.AspectFit
+                            onTouch: {
+                                if (event.touchType == TouchType.Up) {
+                                    categoryBar.activeCategory = "Travel & Places";
+                                    filterByCategory("Travel & Places");
+                                }
+                            }
+                        }
+                    }
+                    
+                    // 6. Objects
+                    Container {
+                        layoutProperties: StackLayoutProperties { spaceQuota: 1 }
+                        layout: DockLayout {}
+                        preferredHeight: ui.sdu(7.0)
+                        
+                        //background: categoryBar.activeCategory === "Objects" ? Color.create("#454545") : Color.Transparent
+                        
+                        ImageView {
+                            imageSource: "asset:///images/objects.png"
+                            horizontalAlignment: HorizontalAlignment.Center
+                            verticalAlignment: VerticalAlignment.Center
+                            filterColor: categoryBar.activeCategory === "Objects" ? Color.create(primaryColor) : isDark ? undefined : Color.create("#282828")
+                            scalingMethod: ScalingMethod.AspectFit
+                            onTouch: {
+                                if (event.touchType == TouchType.Up) {
+                                    categoryBar.activeCategory = "Objects";
+                                    filterByCategory("Objects");
+                                }
+                            }
+                        }
+                    }
+                    
+                    // 7. Symbols
+                    Container {
+                        layoutProperties: StackLayoutProperties { spaceQuota: 1 }
+                        layout: DockLayout {}
+                        preferredHeight: ui.sdu(7.0)
+                        
+                        //background: categoryBar.activeCategory === "Symbols" ? Color.create("#454545") : Color.Transparent
+                        
+                        ImageView {
+                            imageSource: "asset:///images/symbols.png"
+                            horizontalAlignment: HorizontalAlignment.Center
+                            verticalAlignment: VerticalAlignment.Center
+                            filterColor: categoryBar.activeCategory === "Symbols" ? Color.create(primaryColor) : isDark ? undefined : Color.create("#282828")
+                            scalingMethod: ScalingMethod.AspectFit
+                            onTouch: {
+                                if (event.touchType == TouchType.Up) {
+                                    categoryBar.activeCategory = "Symbols";
+                                    filterByCategory("Symbols");
+                                }
+                            }
+                        }
+                    }
+                    
+                    // 8. Flags
+                    Container {
+                        layoutProperties: StackLayoutProperties { spaceQuota: 1 }
+                        layout: DockLayout {}
+                        preferredHeight: ui.sdu(7.0)
+                        
+                        //background: categoryBar.activeCategory === "Flags" ? Color.create("#454545") : Color.Transparent
+                        
+                        ImageView {
+                            imageSource: "asset:///images/flag.png"
+                            horizontalAlignment: HorizontalAlignment.Center
+                            verticalAlignment: VerticalAlignment.Center
+                            filterColor: categoryBar.activeCategory === "Flags" ? Color.create(primaryColor) : isDark ? undefined : Color.create("#282828")
+                            scalingMethod: ScalingMethod.AspectFit
+                            onTouch: {
+                                if (event.touchType == TouchType.Up) {
+                                    categoryBar.activeCategory = "Flags";
+                                    filterByCategory("Flags");
+                                }
+                            }
+                        }
                     }
                 }
             }
+        }
+        
+        Container {
+            id: chatInfo
         }
                 
     }
@@ -2060,22 +2575,6 @@ Label {
     attachedObjects: [
         SystemToast {
             id: voiceToast
-        },
-        ActionItem {
-            id: callAction
-            title: "Chiama"
-            onTriggered: {
-                var phone = callClient.phoneForChat(chatPage.chatID);
-                if (phone.length == 0) {
-                    voiceToast.body = "Numero di telefono non disponibile per questa chat";
-                    voiceToast.show();
-                } else if (callClient.link != "open") {
-                    voiceToast.body = "Server chiamate non collegato (" + callClient.link + ")";
-                    voiceToast.show();
-                } else {
-                    callClient.startCall(phone, chatPage.chatTitle);
-                }
-            }
         },
         TitleBar {
             id: titleBar

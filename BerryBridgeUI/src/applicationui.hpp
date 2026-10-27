@@ -52,6 +52,10 @@ class ApplicationUI: public QObject
     // as in the original.
     Q_PROPERTY(bool darkTheme READ darkTheme WRITE setDarkTheme NOTIFY darkThemeChanged)
     Q_PROPERTY(QVariantMap colors READ colors NOTIFY darkThemeChanged)
+    Q_PROPERTY(bool disableTrackpadFocus READ disableTrackpadFocus WRITE setDisableTrackpadFocus NOTIFY disableTrackpadFocusChanged)
+    // The original's name for darkTheme (its QML reads app.darkMode).
+    Q_PROPERTY(bool darkMode READ darkTheme WRITE setDarkTheme NOTIFY darkThemeChanged)
+    Q_PROPERTY(bool isClassic READ isClassic CONSTANT)
 
 public:
     ApplicationUI();
@@ -72,6 +76,10 @@ public:
     Q_INVOKABLE void takePendingChat();
     // A chat was opened: its notification leaves the Hub.
     Q_INVOKABLE void dismissChatNotification(const QString &chatID);
+    bool disableTrackpadFocus() const;
+    Q_INVOKABLE void setDisableTrackpadFocus(bool disable);
+    Q_INVOKABLE void exitApp();
+    bool isClassic() const;
 
     bool darkTheme() const;
     void setDarkTheme(bool dark);
@@ -92,6 +100,7 @@ signals:
     // Invoked by something other than a chat notification: show the call
     // screen if there is a call.
     void callScreenRequested();
+    void disableTrackpadFocusChanged(bool disable);
 
 private slots:
     void onSystemLanguageChanged();
@@ -116,6 +125,7 @@ private:
     void applyVisualStyle();
     bool isVersionGreater(const QString& current, const QString& latest);
     QString formatMarkdownToHtml(const QString& markdown);
+    bool m_disableTrackpadFocus;
 };
 
 #endif /* ApplicationUI_HPP_ */

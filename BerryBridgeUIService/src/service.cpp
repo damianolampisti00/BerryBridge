@@ -511,7 +511,7 @@ void Service::onSyncResponseReceived()
                     attachmentsJson = QString::fromUtf8(buffer);
                 }
 
-                QString reactionsJson = "[]";
+                QString reactionsJson = "";
                 QVariantList rawReactions = msg["reactions"].toList();
                 if (!rawReactions.isEmpty()) {
                     buffer.clear();
@@ -519,7 +519,7 @@ void Service::onSyncResponseReceived()
                     reactionsJson = QString::fromUtf8(buffer);
                 }
 
-                QString mentionsJson = "[]";
+                QString mentionsJson = "";
                 QVariantList mentionsList = msg["mentions"].toList();
                 if (!mentionsList.isEmpty()) {
                     buffer.clear();
@@ -527,7 +527,7 @@ void Service::onSyncResponseReceived()
                     mentionsJson = QString::fromUtf8(buffer);
                 }
 
-                QString seenJson = "{}";
+                QString seenJson = "";
                 QVariantMap seenMap = msg["seen"].toMap();
                 if (!seenMap.isEmpty()) {
                     buffer.clear();

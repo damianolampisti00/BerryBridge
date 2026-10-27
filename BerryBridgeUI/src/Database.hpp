@@ -67,7 +67,7 @@ public:
     Q_INVOKABLE void copyToClipboard(const QString& text);
     Q_INVOKABLE void saveCredentials(const QString &key, const QString &value);
     Q_INVOKABLE QString getCredentials(const QString &key, const QString &defaultValue = "");
-    Q_INVOKABLE void createChat(const QString& accountID, const QString& participantID, const QString& chatType);
+    Q_INVOKABLE void createChat(const QString& accountID, const QString& participantID, const QString& chatType, const QString& avatar);
     Q_INVOKABLE QVariantList searchMessages(const QString &accountID, const QString &query);
     Q_INVOKABLE void requestDelayedScroll();
     Q_INVOKABLE void sendReaction(const QString &chatID, const QString &msgID, const QString &reactionKey);
@@ -78,6 +78,11 @@ public:
     Q_INVOKABLE void setPin(const QString &chatID, bool value);
     Q_INVOKABLE QVariantMap getImageDimensions(const QString &filePath);
     Q_INVOKABLE QString toPlainText(const QString& htmlText);
+    Q_INVOKABLE void searchContacts(const QString &accountID, const QString &cursor, const QString &searchQuery);
+    Q_INVOKABLE QVariantList getContactsFromDb(const QString &searchQuery, const QString &accountID);
+
+    bool initAvatarDatabase();
+    void downloadAvatar(const QString &chatID, const QString &imgUrl);
 
 
 
@@ -91,7 +96,7 @@ signals:
     void chatsUpdated(QString accountID);
     void downloadProgress(const QString &messageId, int progress);
     void imageDownloaded(const QString &messageId, const QString &localPath);
-    void chatCreatedSuccess(const QString& responseJson); // İstek tamamlandığında QML tarafına sonucu bildiren sinyal
+    void chatCreatedSuccess(const QString& responseJson, const QString& avatar); // İstek tamamlandığında QML tarafına sonucu bildiren sinyal
     void chatCreatedError(int statusCode, const QString& errorString);
     void messageSentSuccessfully(const QString &pendingMsgId);
     void scrollToTargetRequested();
@@ -108,6 +113,9 @@ signals:
     void chatMarkedUnreadSuccessfully();
     void requestNotification(const QString &msgId, const QString &accountID, const QString &chatID, const QString &senderName, const QString &msgType, const QString &text);
     void messagesUpdated();
+    void avatarDownloaded(const QString &chatID, const QString &localUrl);
+    void searchContactsFinished();
+    void searchContactsError(QString errorString);
 
 
 private slots:
@@ -141,6 +149,8 @@ private slots:
     void resumeSyncing();
     void performPeriodicSync();
     void onSyncResponseReceived();
+    void onAvatarDownloaded();
+    void onContactsFetched();
 
 private:
     bool m_initRun;
@@ -163,6 +173,7 @@ private:
     void fetchChatPage(const QString &chatId);
     void upsertChatRow(const QVariantMap &rawChat);
     void touchRefresh();
+    QNetworkReply* m_contactsReply;
     static const QString BEARER_TOKEN;
     static const QString API_BASE;
     bool initContext();
@@ -176,6 +187,7 @@ private:
     // Yardımcı fonksiyon: Bir sonraki sayfayı ister
     void fetchInitialMessages(QString chatId, QString cursor);
     void fetchChatsDetails(QString chatId);
+    void syncContacts(const QString &accountID, const QString &cursor, QString callbackAction);
 
     // Yardımcı fonksiyon: İşlemi bitirir
     void finishDatabaseSync();
@@ -226,6 +238,7 @@ private:
             const QString &msgType,
             const QString &text
         );
+    int m_searchRequestId;
 
 };
 

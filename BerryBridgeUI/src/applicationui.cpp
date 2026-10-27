@@ -117,6 +117,8 @@ ApplicationUI::ApplicationUI() :
     connect(&m_coverTimer, SIGNAL(timeout()), this, SIGNAL(coverRefreshNeeded()));
     connect(Application::instance(), SIGNAL(fullscreen()), this, SLOT(onFullscreen()));
 
+    m_disableTrackpadFocus = m_settings.value("settings/disableTrackpadFocus", true).toBool();
+
     m_networkManager = new QNetworkAccessManager(this);
 
     // Slot imzasına (QNetworkReply*) eklendi
@@ -529,6 +531,34 @@ bool ApplicationUI::hasNewContent(const QString &accountId) const
 {
     QSettings settings(QDir::homePath() + "/Settings/berrybridge_state.ini", QSettings::IniFormat);
     return settings.value(QString("newContent/%1").arg(accountId), false).toBool();
+}
+
+bool ApplicationUI::disableTrackpadFocus() const
+{
+    return m_disableTrackpadFocus;
+}
+
+void ApplicationUI::setDisableTrackpadFocus(bool disable)
+{
+    if (m_disableTrackpadFocus != disable) {
+        m_disableTrackpadFocus = disable;
+        m_settings.setValue("settings/disableTrackpadFocus", disable);
+        m_settings.sync(); // Değişiklikleri diske anında yaz
+        emit disableTrackpadFocusChanged(disable);
+    }
+}
+
+void ApplicationUI::exitApp()
+{
+    bb::cascades::Application::quit();
+}
+
+bool ApplicationUI::isClassic() const
+{
+    bb::device::HardwareInfo info;
+    QString model = info.modelName();
+    // BlackBerry Classic (Q20) model adı kontrolü
+    return model.contains("Classic", Qt::CaseInsensitive) || model.contains("Q20", Qt::CaseInsensitive);
 }
 
 
