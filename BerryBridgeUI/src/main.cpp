@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include "sticker/stickeranimator.hpp"
 #include "applicationui.hpp"
 #include "Database.hpp"
 #include <bb/cascades/Application>
@@ -74,6 +75,7 @@ Q_DECL_EXPORT int main(int argc, char **argv)
     // is loaded and the application scene is set.
     qmlRegisterType<Database>("com.database.web", 1, 0, "Database");
     qmlRegisterType<LocationSession>("my.location", 1, 0, "LocationSession");
+    qmlRegisterType<StickerAnimator>("berrybridge.sticker", 1, 0, "StickerAnimator");
     ApplicationUI appui;
 
     // Enter the application main event loop.

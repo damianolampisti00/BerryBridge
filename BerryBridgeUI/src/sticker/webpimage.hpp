@@ -15,8 +15,8 @@ namespace WebPImage
     bool isWebP(const QByteArray &data);
 
     // The image, or its first frame for an animated sticker; a null QImage
-    // if data isn't a valid WebP file.
-    QImage decodeFirstFrame(const QByteArray &data);
+    // if data isn't a valid WebP file. *frameCount: 1, or more if animated.
+    QImage decodeFirstFrame(const QByteArray &data, int *frameCount = 0);
 }
 
 #endif /* WEBPIMAGE_HPP_ */

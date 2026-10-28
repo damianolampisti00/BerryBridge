@@ -8,7 +8,7 @@ bool WebPImage::isWebP(const QByteArray &data)
     return data.size() >= 12 && data.startsWith("RIFF") && data.mid(8, 4) == "WEBP";
 }
 
-QImage WebPImage::decodeFirstFrame(const QByteArray &data)
+QImage WebPImage::decodeFirstFrame(const QByteArray &data, int *frameCount)
 {
     if (!isWebP(data)) return QImage();
 
@@ -34,6 +34,7 @@ QImage WebPImage::decodeFirstFrame(const QByteArray &data)
         // copy(): the buffer belongs to the decoder, freed just below.
         image = QImage(pixels, info.canvas_width, info.canvas_height, info.canvas_width * 4,
                        QImage::Format_ARGB32_Premultiplied).copy();
+        if (frameCount) *frameCount = info.frame_count;
     }
     WebPAnimDecoderDelete(decoder);
     return image;

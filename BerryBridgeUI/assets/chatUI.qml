@@ -2,6 +2,7 @@ import bb.cascades 1.4
 import bb.system 1.2
 import bb.device 1.4
 import bb.cascades.pickers 1.0
+import berrybridge.sticker 1.0
 
 Page {
     id: chatPage
@@ -1485,12 +1486,25 @@ Page {
                                             layout: DockLayout {
                                             }
                                             ImageView {
+                                                id: stickerImage
                                                 visible: !! ListItemData.localImagePath
-                                                imageSource: ListItemData.localImagePath ? ListItemData.localImagePath : ""
                                                 horizontalAlignment: HorizontalAlignment.Fill
                                                 verticalAlignment: VerticalAlignment.Fill
                                                 scalingMethod: ScalingMethod.AspectFit
+                                                attachedObjects: [
+                                                    // Sets the image: the PNG, or the frames of an animated sticker.
+                                                    StickerAnimator {
+                                                        id: stickerAnimator
+                                                        imageView: stickerImage
+                                                        source: ListItemData.localImagePath ? ListItemData.localImagePath : ""
+                                                    }
+                                                ]
                                             }
+                                            gestureHandlers: [
+                                                TapHandler {
+                                                    onTapped: stickerAnimator.play() // once more, after its loops
+                                                }
+                                            ]
                                             ImageView {
                                                 visible: ! ListItemData.localImagePath
                                                 imageSource: "asset:///images/ic_view_image.png"

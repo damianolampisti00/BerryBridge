@@ -3,6 +3,7 @@
 #include <resolv.h>
 #include "Database.hpp"
 #include "sticker/webpimage.hpp"
+#include "sticker/stickeranimator.hpp"
 #include <QDir>
 
 // Volatile state written often by BOTH processes (sync cursor, new-content
@@ -1992,9 +1993,10 @@ void Database::saveAvatar(const QString &src, const QByteArray &data)
 // {mimeType image/webp, isSticker, size 190x190 (the display size, the file
 // is usually 512x512), id mxc://...}, animated ones as animated WebP (all
 // checked 2026-10-28). BB10 decodes no WebP, so each sticker is fetched
-// through /v1/assets/serve, decoded with libwebp (src/sticker; first frame
-// of an animated one) and cached as a PNG in the private cache, one file per
-// sticker: the same sticker sent again is not fetched again.
+// through /v1/assets/serve, decoded with libwebp (src/sticker) and cached as
+// a PNG of its first frame in the private cache, one file per sticker: the
+// same sticker sent again is not fetched again. An animated one also keeps
+// its WebP there, which StickerAnimator plays in the chat.
 
 static QString stickerDir() { return bbCachePath("stickers"); }
 static const int kStickerParallel = 2;
@@ -2050,12 +2052,19 @@ void Database::onStickerFetched()
     bool saved = false;
     if (reply->error() == QNetworkReply::NoError && status == 200) {
         const QByteArray data = reply->readAll();
-        QImage image = WebPImage::isWebP(data) ? WebPImage::decodeFirstFrame(data)
+        int frames = 1;
+        QImage image = WebPImage::isWebP(data) ? WebPImage::decodeFirstFrame(data, &frames)
                                                : QImage::fromData(data); // PNG/JPEG/GIF stickers
         if (!image.isNull()) {
             if (image.width() > kStickerSide || image.height() > kStickerSide)
                 image = image.scaled(kStickerSide, kStickerSide, Qt::KeepAspectRatio, Qt::SmoothTransformation);
             QDir().mkpath(stickerDir());
+            // An animated one keeps its WebP next to the PNG, for the chat's
+            // StickerAnimator (src/sticker), which plays it from there.
+            if (frames > 1) {
+                QFile anim(StickerAnimator::animationPathFor(stickerCachePath(src)));
+                if (anim.open(QIODevice::WriteOnly)) anim.write(data);
+            }
             saved = image.save(stickerCachePath(src), "PNG");
         } else {
             qWarning() << "[STICKER] can't decode" << data.size() << "bytes:" << data.left(16).toHex();
