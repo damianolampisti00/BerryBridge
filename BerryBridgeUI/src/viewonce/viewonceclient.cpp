@@ -40,10 +40,18 @@ bool ViewOnceClient::configured() const
     return !s.value("viewOnceUrl").toString().isEmpty() && !s.value("viewOnceToken").toString().isEmpty();
 }
 
+// mautrix-whatsapp: "You received a view once message. For added privacy, you
+// can only open it on the WhatsApp app."
+static bool isWhatsAppNotice(const QString &text)
+{
+    return text.startsWith("You received a view once message");
+}
+
 bool ViewOnceClient::isViewOnceNotice(const QString &text)
 {
     // mautrix-instagram: "This %s can only be %s once. Use the Instagram app to view."
-    return QRegExp("can only be \\w+ once\\. Use the Instagram app").indexIn(text) >= 0;
+    return QRegExp("can only be \\w+ once\\. Use the Instagram app").indexIn(text) >= 0
+            || isWhatsAppNotice(text);
 }
 
 QString ViewOnceClient::instagramPeer(const QString &accountID, const QString &chatID) const
@@ -115,7 +123,7 @@ void ViewOnceClient::onSendFinished()
     else emit failed(tr("Invio non riuscito (%1)").arg(status));
 }
 
-void ViewOnceClient::open(const QString &utcTimestamp)
+void ViewOnceClient::open(const QString &utcTimestamp, const QString &noticeText)
 {
     if (m_reply) return;
     QSettings s;
@@ -132,7 +140,7 @@ void ViewOnceClient::open(const QString &utcTimestamp)
         emit failed(tr("Orario del messaggio non leggibile"));
         return;
     }
-    QUrl url(base + "/v1/open");
+    QUrl url(base + (isWhatsAppNotice(noticeText) ? "/v1/wa/open" : "/v1/open"));
     url.addQueryItem("ts", QString::number(when.toTime_t()));
     QNetworkRequest req(url);
     req.setRawHeader("Authorization", "Bearer " + token.toUtf8());

@@ -21,6 +21,12 @@ raven_attachment with view_mode "once"):
 
 into the one-to-one thread with that user (it must exist already).
 
+    GET /v1/wa/...                                    (WhatsApp, same token)
+
+is passed on to waviewonce (WaCalls' cmd/waviewonce, on WAVIEWONCE_ADDR), which
+does the same for WhatsApp view-once media, so that Berry Bridge needs one
+address and one token for both.
+
 Setup: data/settings.json (instagrapi session, created by `login_from_feather`),
 data/token (generated on first start). Listens on 127.0.0.1:8103.
 """
@@ -33,6 +39,7 @@ import random
 import secrets
 import threading
 import time
+import urllib.error
 import urllib.request
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -47,6 +54,7 @@ DATA = os.path.join(HERE, "data")
 SETTINGS = os.path.join(DATA, "settings.json")
 ACCOUNT = os.path.join(DATA, "account")   # the Instagram username this service is for
 ADDR = ("127.0.0.1", int(os.environ.get("IGVIEW_PORT", "8103")))
+WAVIEWONCE = "http://" + os.environ.get("WAVIEWONCE_ADDR", "127.0.0.1:8104")
 MATCH_WINDOW_S = 300        # a notice and its Instagram item are a few seconds apart
 THREADS_TO_SCAN = 20
 MAX_MEDIA_BYTES = 40 << 20
@@ -258,8 +266,12 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         if u.path == "/health":
             return self.reply(200, {"ok": True})
+        if u.path.startswith("/v1/wa/qr/"):   # linking page, guarded by its own secret path
+            return self.to_waviewonce()
         if not self.authorized():
             return
+        if u.path.startswith("/v1/wa/"):
+            return self.to_waviewonce()
         q = parse_qs(u.query)
         try:
             with _lock:
@@ -292,6 +304,16 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             log.exception("request failed")
             return self.reply(500, {"error": type(e).__name__})
+
+    def to_waviewonce(self):
+        req = urllib.request.Request(WAVIEWONCE + self.path, headers={"Authorization": "Bearer " + TOKEN})
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                return self.reply(r.status, body=r.read(MAX_MEDIA_BYTES + 1), ctype=r.headers.get("Content-Type", "application/json"))
+        except urllib.error.HTTPError as e:
+            return self.reply(e.code, body=e.read(), ctype=e.headers.get("Content-Type", "application/json"))
+        except OSError:
+            return self.reply(503, {"error": "waviewonce", "message": "Servizio WhatsApp a visualizzazione singola non attivo"})
 
     def do_POST(self):
         u = urlparse(self.path)

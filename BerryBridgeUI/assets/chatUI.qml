@@ -1087,15 +1087,15 @@ Page {
                                             title: "Message Options"
                                             //subtitle: "Message Options"
 
-                                            // Instagram view-once photo/video: Beeper only gets a
+                                            // Instagram/WhatsApp view-once photo/video: Beeper only gets a
                                             // notice, the igview server fetches it once (viewOnce).
                                             ActionItem {
                                                 title: "Apri (visualizzazione singola)"
                                                 imageSource: "asset:///images/ic_view_image.png"
-                                                // not on our own: Instagram never shows a view-once to its sender
+                                                // not on our own: neither app shows a view-once to its sender
                                                 enabled: ListItemData.type === "NOTICE" && ! ListItemData.isSender && rootMessageItem.listView.viewOnceClient.isViewOnceNotice(ListItemData.text)
                                                 onTriggered: {
-                                                    rootMessageItem.listView.viewOnceClient.open(ListItemData.rawTimestamp ? ListItemData.rawTimestamp : new Date().toISOString())
+                                                    rootMessageItem.listView.viewOnceClient.open(ListItemData.rawTimestamp ? ListItemData.rawTimestamp : new Date().toISOString(), ListItemData.text)
                                                 }
                                             }
                                             
