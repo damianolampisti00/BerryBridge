@@ -15,6 +15,7 @@
  */
 
 #include "../../BerryBridgeUIService/src/cachepaths.hpp"
+#include "../../BerryBridgeUIService/src/notificationkey.hpp"
 #include "applicationui.hpp"
 #include "Database.hpp"
 #include "ScreenManager.hpp"
@@ -329,7 +330,9 @@ QVariantMap ApplicationUI::colors() const
 
 void ApplicationUI::dismissChatNotification(const QString &chatID)
 {
-    // The service keys each chat's notification by its chatID (Service::createMessageNotification).
+    // The service keys each chat's notification by bbChatNotificationKey
+    // (Service::createMessageNotification); older builds used the raw chatID.
+    bb::platform::Notification::deleteFromInbox(bbChatNotificationKey(chatID));
     bb::platform::Notification::deleteFromInbox(chatID);
 }
 
