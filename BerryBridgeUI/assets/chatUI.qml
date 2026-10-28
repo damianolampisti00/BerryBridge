@@ -2,6 +2,7 @@ import bb.cascades 1.4
 import bb.system 1.2
 import bb.device 1.4
 import bb.cascades.pickers 1.0
+import berrybridge.sticker 1.0
 
 Page {
     id: chatPage
@@ -1062,6 +1063,13 @@ Page {
                                                     rText = "📍 Location "+rText;
                                                 } else if (ListItemData.type==="STICKER") {
                                                     rText = "🌞 Sticker "+rText;
+                                                    if(ListItemData.localImagePath){
+                                                        cLV.rootPage.replyAttachWidth=rootMessageItem.listView.displayWidth * 0.1;
+                                                        cLV.rootPage.replyAttachHeight=cLV.rootPage.replyAttachWidth
+                                                        cLV.rootPage.replyAttachRatio=1
+                                                        cLV.rootPage.replyAttachImgUrl=ListItemData.localImagePath
+                                                        cLV.rootPage.replyAttachVisible=true
+                                                    }
                                                 }
                                                 cLV.rootPage.replyMessage=rText;
                                                 cLV.rootPage.iField.requestFocus();
@@ -1107,7 +1115,7 @@ Page {
                                                 property bool isSearch: rootMessageItem.listView.rootPage.isSearchMode
                                                 title: "Edit"
                                                 imageSource:"asset:///images/ic_edit.png"
-                                                enabled:!isSearch && ListItemData.isSender && ListItemData.type.toString().toUpperCase()=="TEXT"
+                                                enabled:!isSearch && ListItemData.isSender && !! ListItemData.type && ListItemData.type.toString().toUpperCase()=="TEXT"
                                                 onTriggered: {
                                                     var cLV = rootMessageItem.listView;
                                                     cLV.opacity=0.1;
@@ -1163,6 +1171,13 @@ Page {
                                                         rText = "📍 Location "+rText;
                                                     } else if (ListItemData.type==="STICKER") {
                                                         rText = "🌞 Sticker "+rText;
+                                                        if(ListItemData.localImagePath){
+                                                            cLV.rootPage.replyAttachWidth=rootMessageItem.listView.displayWidth * 0.1;
+                                                            cLV.rootPage.replyAttachHeight=cLV.rootPage.replyAttachWidth
+                                                            cLV.rootPage.replyAttachRatio=1
+                                                            cLV.rootPage.replyAttachImgUrl=ListItemData.localImagePath
+                                                            cLV.rootPage.replyAttachVisible=true
+                                                        }
                                                     }
                                                     cLV.rootPage.replyMessage=rText;
                                                     cLV.rootPage.iField.requestFocus();
@@ -1267,7 +1282,8 @@ Page {
                                     }
                                     
                                     Container {
-                                        background: ListItemData.isSender ? Color.create(rootMessageItem.listView.rootPage.bubbleColor) : Color.create(Qt.app.colors.incoming)
+                                        background: (ListItemData.type === "STICKER" && ListItemData.localImagePath && ! ListItemData.hasMention) ? Color.Transparent
+                                                    : ListItemData.isSender ? Color.create(rootMessageItem.listView.rootPage.bubbleColor) : Color.create(Qt.app.colors.incoming)
                                         leftPadding: ui.du(1.5); rightPadding: ui.du(1.5); topPadding: ui.du(1.0); bottomPadding: ui.du(1.0)
                                         layout: StackLayout {
                                         }
@@ -1275,7 +1291,7 @@ Page {
                                         // Show sender name if it's a group and not from us
                                         Label {
                                             id: senderNameLabel                                                   
-                                            visible: (rootMessageItem.chatType !== "single" && rootMessageItem.chatType !== "channel" && ! ListItemData.isSender && ListItemData.senderName.indexOf("bot") === -1);
+                                            visible: (rootMessageItem.chatType !== "single" && rootMessageItem.chatType !== "channel" && ! ListItemData.isSender && (ListItemData.senderName || "").indexOf("bot") === -1);
                                             text: ListItemData.senderName
                                             textStyle.fontWeight: FontWeight.Bold
                                             textStyle.color: Color.create(rootMessageItem.listView.rootPage.darkenColor(rootMessageItem.listView.rootPage.primaryColor,90))
@@ -1458,6 +1474,48 @@ Page {
                                             }
                                         }                               
                                         
+                                        // Sticker: drawn without a frame, fetched and decoded by
+                                        // itself (Database::stickerFor), a placeholder until then.
+                                        Container {
+                                            id: stickerCont
+                                            property real side: rootMessageItem.listView.displayWidth * 0.4
+                                            visible: ListItemData.type === "STICKER" && !! ListItemData.mxcUrl
+                                            preferredWidth: side
+                                            preferredHeight: side
+                                            horizontalAlignment: ListItemData.isSender ? HorizontalAlignment.Right : HorizontalAlignment.Left
+                                            layout: DockLayout {
+                                            }
+                                            ImageView {
+                                                id: stickerImage
+                                                visible: !! ListItemData.localImagePath
+                                                horizontalAlignment: HorizontalAlignment.Fill
+                                                verticalAlignment: VerticalAlignment.Fill
+                                                scalingMethod: ScalingMethod.AspectFit
+                                                attachedObjects: [
+                                                    // Sets the image: the PNG, or the frames of an animated sticker.
+                                                    StickerAnimator {
+                                                        id: stickerAnimator
+                                                        imageView: stickerImage
+                                                        source: ListItemData.localImagePath ? ListItemData.localImagePath : ""
+                                                    }
+                                                ]
+                                            }
+                                            gestureHandlers: [
+                                                TapHandler {
+                                                    onTapped: stickerAnimator.play() // once more, after its loops
+                                                }
+                                            ]
+                                            ImageView {
+                                                visible: ! ListItemData.localImagePath
+                                                imageSource: "asset:///images/ic_view_image.png"
+                                                preferredWidth: ui.du(8.0)
+                                                preferredHeight: ui.du(8.0)
+                                                filterColor: Color.create(Qt.app.colors.muted)
+                                                horizontalAlignment: HorizontalAlignment.Center
+                                                verticalAlignment: VerticalAlignment.Center
+                                            }
+                                        }
+
                                         Container {
                                             id:audioVideoCont
                                             property string upperType: ListItemData.type ? ListItemData.type.toString().toUpperCase() : ""
@@ -1713,7 +1771,7 @@ Page {
                                             Label {
                                                 text: ListItemData.text
                                                 multiline: true
-                                                textStyle.fontSize: ListItemData.text.replace(/<[^>]*>/g, '').length < 3 ? FontSize.XLarge : FontSize.Medium;                                                textFormat: TextFormat.Html
+                                                textStyle.fontSize: (ListItemData.text || "").replace(/<[^>]*>/g, '').length < 3 ? FontSize.XLarge : FontSize.Medium;                                                textFormat: TextFormat.Html
                                                 topMargin: 0;
                                                 bottomMargin: 0;
                                                 textStyle.color: Color.create(Qt.app.colors.text)

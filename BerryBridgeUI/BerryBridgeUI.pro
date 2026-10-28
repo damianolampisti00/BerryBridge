@@ -26,6 +26,15 @@ INCLUDEPATH += $$quote($$_PRO_FILE_PWD_/../third_party/opus/include)
 LIBS += $$quote($$_PRO_FILE_PWD_/../third_party/opus/lib/armv7/libopus.a)
 LIBS += -lasound -laudio_manager -lbbmultimedia
 
+# --- Stickers (src/sticker): WhatsApp sends them as WebP, which BB10 can't
+# decode, animated ones too (StickerAnimator plays them); libwebp 1.4.0 decoder + demuxer, vendored (third_party/libwebp,
+# rebuilt by its build-libwebp.sh, armv7 only).
+SOURCES += src/sticker/webpimage.cpp src/sticker/stickeranimator.cpp
+HEADERS += src/sticker/webpimage.hpp src/sticker/stickeranimator.hpp
+INCLUDEPATH += $$quote($$_PRO_FILE_PWD_/../third_party/libwebp/include)
+LIBS += $$quote($$_PRO_FILE_PWD_/../third_party/libwebp/lib/armv7/libwebpdemux.a)
+LIBS += $$quote($$_PRO_FILE_PWD_/../third_party/libwebp/lib/armv7/libwebpdecoder.a)
+
 # --- Instagram view-once media through the igview service (src/viewonce).
 SOURCES += src/viewonce/viewonceclient.cpp
 HEADERS += src/viewonce/viewonceclient.hpp
