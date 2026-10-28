@@ -45,6 +45,7 @@ static QString stateSettingsPath()
 #include "freshresolver.hpp"
 #include "tlspolicy.hpp"
 #include "cachepaths.hpp"
+#include "notificationkey.hpp"
 #include <new>
 
 #include "memoryguard.hpp"
@@ -832,7 +833,11 @@ void Service::createMessageNotification(const QString& accountID, const QString&
 
     if(isChatMuted) return;
 
-    bb::platform::Notification *msgNotify = new bb::platform::Notification(chatID, this);
+    // Older builds keyed it by the raw chatID: drop that one, or the chat
+    // would show two notifications.
+    bb::platform::Notification::deleteFromInbox(chatID);
+    bb::platform::Notification *msgNotify =
+            new bb::platform::Notification(bbChatNotificationKey(chatID), this);
 
     // Include account and sender OR group/channel/community name in title
     QString titleStr;
