@@ -2,7 +2,7 @@
 #define WEBPIMAGE_HPP_
 
 #include <QByteArray>
-#include <QImage>
+#include <QtGui/QImage>
 
 // Decodes a WebP file (the format of WhatsApp stickers, received via the
 // Beeper bridge) into a QImage. BB10 has no WebP codec (its img_codec_*.so
