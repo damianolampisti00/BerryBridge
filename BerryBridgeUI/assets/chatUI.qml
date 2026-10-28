@@ -1115,7 +1115,7 @@ Page {
                                                 property bool isSearch: rootMessageItem.listView.rootPage.isSearchMode
                                                 title: "Edit"
                                                 imageSource:"asset:///images/ic_edit.png"
-                                                enabled:!isSearch && ListItemData.isSender && ListItemData.type.toString().toUpperCase()=="TEXT"
+                                                enabled:!isSearch && ListItemData.isSender && !! ListItemData.type && ListItemData.type.toString().toUpperCase()=="TEXT"
                                                 onTriggered: {
                                                     var cLV = rootMessageItem.listView;
                                                     cLV.opacity=0.1;
@@ -1291,7 +1291,7 @@ Page {
                                         // Show sender name if it's a group and not from us
                                         Label {
                                             id: senderNameLabel                                                   
-                                            visible: (rootMessageItem.chatType !== "single" && rootMessageItem.chatType !== "channel" && ! ListItemData.isSender && ListItemData.senderName.indexOf("bot") === -1);
+                                            visible: (rootMessageItem.chatType !== "single" && rootMessageItem.chatType !== "channel" && ! ListItemData.isSender && (ListItemData.senderName || "").indexOf("bot") === -1);
                                             text: ListItemData.senderName
                                             textStyle.fontWeight: FontWeight.Bold
                                             textStyle.color: Color.create(rootMessageItem.listView.rootPage.darkenColor(rootMessageItem.listView.rootPage.primaryColor,90))
@@ -1771,7 +1771,7 @@ Page {
                                             Label {
                                                 text: ListItemData.text
                                                 multiline: true
-                                                textStyle.fontSize: ListItemData.text.replace(/<[^>]*>/g, '').length < 3 ? FontSize.XLarge : FontSize.Medium;                                                textFormat: TextFormat.Html
+                                                textStyle.fontSize: (ListItemData.text || "").replace(/<[^>]*>/g, '').length < 3 ? FontSize.XLarge : FontSize.Medium;                                                textFormat: TextFormat.Html
                                                 topMargin: 0;
                                                 bottomMargin: 0;
                                                 textStyle.color: Color.create(Qt.app.colors.text)
