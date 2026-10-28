@@ -266,6 +266,8 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         if u.path == "/health":
             return self.reply(200, {"ok": True})
+        if u.path.startswith("/v1/wa/qr/"):   # linking page, guarded by its own secret path
+            return self.to_waviewonce()
         if not self.authorized():
             return
         if u.path.startswith("/v1/wa/"):
