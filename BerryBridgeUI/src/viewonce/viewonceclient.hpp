@@ -8,12 +8,14 @@
 class QNetworkAccessManager;
 class QNetworkReply;
 
-// Instagram view-once photos and videos (QML context property "viewOnce").
-// Beeper's bridge only gets a notice for them ("This image can only be viewed
-// once. Use the Instagram app to view."); the igview service on the server
-// (BerryBridge/igview) fetches the media through Instagram's mobile API.
-// open() asks it for the item next to the notice's time: the service streams
-// it once and marks it seen on Instagram.
+// Instagram and WhatsApp view-once photos and videos (QML context property
+// "viewOnce"). Beeper's bridges only get a notice for them ("This image can
+// only be viewed once. Use the Instagram app to view.", "You received a view
+// once message. ... only open it on the WhatsApp app."); the igview service on
+// the server (BerryBridge/igview) fetches Instagram's through its mobile API
+// and passes WhatsApp's to waviewonce (WaCalls), a linked device that receives
+// them. open() asks for the item next to the notice's time: the service
+// streams it once and marks it seen.
 //
 // Nothing is kept: a photo lives only in memory (the `image` property) until
 // clear(); a video needs a file for the player, which is deleted a minute
@@ -42,8 +44,9 @@ public:
 
     // True for the bridge's notice that stands in for a view-once media.
     Q_INVOKABLE static bool isViewOnceNotice(const QString &text);
-    // utcTimestamp: the notice message's timestamp as stored (ISO 8601, UTC).
-    Q_INVOKABLE void open(const QString &utcTimestamp);
+    // utcTimestamp: the notice message's timestamp as stored (ISO 8601, UTC);
+    // noticeText tells WhatsApp's notice from Instagram's.
+    Q_INVOKABLE void open(const QString &utcTimestamp, const QString &noticeText = QString());
     // Drops the photo from memory (the viewer closed).
     Q_INVOKABLE void clear();
     // The other person's Instagram username in a one-to-one Instagram chat
