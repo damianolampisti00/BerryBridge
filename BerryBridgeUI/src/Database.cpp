@@ -2,6 +2,7 @@
 #include "../../BerryBridgeUIService/src/cachepaths.hpp"
 #include <resolv.h>
 #include "Database.hpp"
+#include "sticker/webpimage.hpp"
 #include <QDir>
 
 // Volatile state written often by BOTH processes (sync cursor, new-content
@@ -58,6 +59,7 @@ Database::Database(QObject *parent) : QObject(parent)
     connect(m_netManager, SIGNAL(finished(QNetworkReply*)), this, SLOT(onAnyReplyFinished(QNetworkReply*)));
 
     m_avatarActive = 0;
+    m_stickerActive = 0;
     m_avatarRefresh = new QTimer(this);
     m_avatarRefresh->setSingleShot(true);
     m_avatarRefresh->setInterval(700);
@@ -1450,7 +1452,6 @@ QVariantList Database::getMessagesForChat(const QString &accountID, const QStrin
             message["type"] = msgType;
             message["rawTimestamp"] = query.value(2).toString(); // UTC ISO, for viewOnce.open()
             message["isSender"] = query.value(4).toBool();
-            bool isSenderMain = query.value(4).toBool();
             message["isUnread"] = query.value(5).toBool();
             message["mxcUrl"] = "";
             message["localImagePath"] = "";
@@ -1560,11 +1561,6 @@ QVariantList Database::getMessagesForChat(const QString &accountID, const QStrin
                 timestampStr="Edited "+timestampStr;
             }
 
-            if(msgType == "STICKER"){
-                message["text"]=QString::fromUtf8("🌞  A sticker is received");
-                if (isSenderMain) message["text"]=QString::fromUtf8("🌞  A sticker is sent");
-                timestampStr="Not supported! "+timestampStr;
-            }
             message["timestamp"] = timestampStr;
 
             // Ek (Attachment) İşleme
@@ -1684,7 +1680,16 @@ QVariantList Database::getMessagesForChat(const QString &accountID, const QStrin
                     if (QFile::exists(localPath)) {
                         message["localImagePath"] = "file://" + localPath;
                     }
+
+                    // Shown inline, fetched on its own (see "Stickers").
+                    if (msgType == "STICKER" && !isDeleted) {
+                        message["localImagePath"] = stickerFor(attachmentID, msgId);
+                    }
                 }
+            }
+            if (msgType == "STICKER" && !isDeleted && message["localImagePath"].toString().isEmpty()
+                    && message["mxcUrl"].toString().isEmpty()) {
+                message["text"] = QString::fromUtf8("🌞 Sticker"); // no attachment to show
             }
 
             message["linkedMessageID"] = linkedMessageID;
@@ -1720,11 +1725,13 @@ QVariantList Database::getMessagesForChat(const QString &accountID, const QStrin
                     QString menAttachJson = linkedQuery.value(4).toString();
                     QVariantMap sizeMap;
                     QString menMimeType;
+                    QString menMxcUrl;
                     if (!menAttachJson.isEmpty()) {
                         QVariantList attachments = jda.loadFromBuffer(menAttachJson).toList();
                         if (!attachments.isEmpty()) {
                             QVariantMap firstAttachment = attachments.first().toMap();
                             menFileName = firstAttachment["fileName"].toString();
+                            menMxcUrl = firstAttachment["id"].toString();
                             sizeMap = firstAttachment["size"].toMap();
                             menMimeType = firstAttachment["mimeType"].toString().toLower();
                         }
@@ -1773,6 +1780,11 @@ QVariantList Database::getMessagesForChat(const QString &accountID, const QStrin
                         mentionPreview = QString::fromUtf8("📍 Location ")+mentionPreview;
                     } else if (linkedType == "STICKER") {
                         mentionPreview = QString::fromUtf8("🌞 Sticker ")+mentionPreview;
+                        // Its picture too, once fetched (imageDownloaded with the
+                        // sticker's id fills mentionImgLocalUrl in the chat).
+                        const QString stickerUrl = stickerFor(menMxcUrl, linkedMessageID);
+                        isMentionImg = true;
+                        mentionImgLocalUrl = stickerUrl.isEmpty() ? QString("asset:///images/ic_view_image.png") : stickerUrl;
                     }
 
                 } else {
@@ -1972,6 +1984,93 @@ void Database::saveAvatar(const QString &src, const QByteArray &data)
         return;
     }
     m_avatarRefresh->start(); // one list reload per burst of arrivals
+}
+
+// ---- Stickers ---------------------------------------------------------
+// The upstream app only wrote "A sticker is received ... Not supported!".
+// WhatsApp stickers reach Beeper as type STICKER with one attachment
+// {mimeType image/webp, isSticker, size 190x190 (the display size, the file
+// is usually 512x512), id mxc://...}, animated ones as animated WebP (all
+// checked 2026-10-28). BB10 decodes no WebP, so each sticker is fetched
+// through /v1/assets/serve, decoded with libwebp (src/sticker; first frame
+// of an animated one) and cached as a PNG in the private cache, one file per
+// sticker: the same sticker sent again is not fetched again.
+
+static QString stickerDir() { return bbCachePath("stickers"); }
+static const int kStickerParallel = 2;
+static const int kStickerSide = 320; // px: the chat shows them ~40% of 720 wide
+
+QString Database::stickerCachePath(const QString &src)
+{
+    return stickerDir() + "/"
+            + QString::fromLatin1(QCryptographicHash::hash(src.toUtf8(), QCryptographicHash::Md5).toHex())
+            + ".png";
+}
+
+// The cached sticker's file:// URL, or "" after queueing its download;
+// imageDownloaded(messageId, url) follows once it is in.
+QString Database::stickerFor(const QString &src, const QString &messageId)
+{
+    if (src.isEmpty()) return QString();
+    const QString path = stickerCachePath(src);
+    if (QFile::exists(path)) return "file://" + path;
+    if (m_stickerFailed.contains(src)) return QString();
+    if (!m_stickerWaiting.contains(src)) m_stickerQueue.append(src);
+    QStringList &ids = m_stickerWaiting[src];
+    if (!ids.contains(messageId)) ids.append(messageId);
+    pumpStickerQueue();
+    return QString();
+}
+
+void Database::pumpStickerQueue()
+{
+    while (m_stickerActive < kStickerParallel && !m_stickerQueue.isEmpty()) {
+        const QString src = m_stickerQueue.takeFirst();
+        QUrl url(m_url + "/v1/assets/serve");
+        url.addQueryItem("url", src);
+        QNetworkRequest request(url);
+        request.setRawHeader("Authorization", ("Bearer " + m_accessToken).toLatin1());
+        QNetworkReply *reply = m_netManager->get(request);
+        reply->setProperty("stickerSrc", src);
+        connect(reply, SIGNAL(finished()), this, SLOT(onStickerFetched()));
+        ++m_stickerActive;
+    }
+}
+
+void Database::onStickerFetched()
+{
+    QNetworkReply *reply = qobject_cast<QNetworkReply *>(sender());
+    if (!reply) return;
+    reply->deleteLater();
+    --m_stickerActive;
+    const QString src = reply->property("stickerSrc").toString();
+    const QStringList ids = m_stickerWaiting.take(src);
+    const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+
+    bool saved = false;
+    if (reply->error() == QNetworkReply::NoError && status == 200) {
+        const QByteArray data = reply->readAll();
+        QImage image = WebPImage::isWebP(data) ? WebPImage::decodeFirstFrame(data)
+                                               : QImage::fromData(data); // PNG/JPEG/GIF stickers
+        if (!image.isNull()) {
+            if (image.width() > kStickerSide || image.height() > kStickerSide)
+                image = image.scaled(kStickerSide, kStickerSide, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+            QDir().mkpath(stickerDir());
+            saved = image.save(stickerCachePath(src), "PNG");
+        } else {
+            qWarning() << "[STICKER] can't decode" << data.size() << "bytes:" << data.left(16).toHex();
+        }
+    } else {
+        qWarning() << "[STICKER] fetch failed, HTTP" << status << reply->errorString();
+    }
+
+    if (saved) {
+        const QString localUrl = "file://" + stickerCachePath(src);
+        for (int i = 0; i < ids.size(); ++i) emit imageDownloaded(ids.at(i), localUrl);
+    } else {
+        m_stickerFailed.insert(src);
+    }
+    pumpStickerQueue();
 }
 
 void Database::onAttachmentDownloaded() {

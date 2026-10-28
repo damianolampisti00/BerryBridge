@@ -134,6 +134,7 @@ private slots:
     void onAttachmentDownloaded();
     void onDownloadProgress(qint64 bytesReceived);
     void onAvatarFetched();
+    void onStickerFetched();
     void onCreateChatFinished(); // Asenkron ağ yanıtını yakalayan slot
     void onAssetUploadFinished();
     void onSendReactionFinished();
@@ -224,6 +225,17 @@ private:
     QSet<QString> m_avatarFailed;  // not retried until the app restarts
     int m_avatarActive;
     QTimer* m_avatarRefresh;
+
+    // Stickers (see "Stickers" in Database.cpp): fetched in the background,
+    // decoded from WebP and cached as PNG, one file per sticker; the chat
+    // hears of each one through imageDownloaded().
+    static QString stickerCachePath(const QString &src);
+    QString stickerFor(const QString &src, const QString &messageId);
+    void pumpStickerQueue();
+    QStringList m_stickerQueue;
+    QHash<QString, QStringList> m_stickerWaiting; // src -> message ids, queued or in flight
+    QSet<QString> m_stickerFailed;                // not retried until the app restarts
+    int m_stickerActive;
 
     QTimer* m_syncTimer;
     QNetworkReply* m_syncReply;

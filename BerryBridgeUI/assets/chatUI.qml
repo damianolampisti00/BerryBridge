@@ -1062,6 +1062,13 @@ Page {
                                                     rText = "📍 Location "+rText;
                                                 } else if (ListItemData.type==="STICKER") {
                                                     rText = "🌞 Sticker "+rText;
+                                                    if(ListItemData.localImagePath){
+                                                        cLV.rootPage.replyAttachWidth=rootMessageItem.listView.displayWidth * 0.1;
+                                                        cLV.rootPage.replyAttachHeight=cLV.rootPage.replyAttachWidth
+                                                        cLV.rootPage.replyAttachRatio=1
+                                                        cLV.rootPage.replyAttachImgUrl=ListItemData.localImagePath
+                                                        cLV.rootPage.replyAttachVisible=true
+                                                    }
                                                 }
                                                 cLV.rootPage.replyMessage=rText;
                                                 cLV.rootPage.iField.requestFocus();
@@ -1163,6 +1170,13 @@ Page {
                                                         rText = "📍 Location "+rText;
                                                     } else if (ListItemData.type==="STICKER") {
                                                         rText = "🌞 Sticker "+rText;
+                                                        if(ListItemData.localImagePath){
+                                                            cLV.rootPage.replyAttachWidth=rootMessageItem.listView.displayWidth * 0.1;
+                                                            cLV.rootPage.replyAttachHeight=cLV.rootPage.replyAttachWidth
+                                                            cLV.rootPage.replyAttachRatio=1
+                                                            cLV.rootPage.replyAttachImgUrl=ListItemData.localImagePath
+                                                            cLV.rootPage.replyAttachVisible=true
+                                                        }
                                                     }
                                                     cLV.rootPage.replyMessage=rText;
                                                     cLV.rootPage.iField.requestFocus();
@@ -1267,7 +1281,8 @@ Page {
                                     }
                                     
                                     Container {
-                                        background: ListItemData.isSender ? Color.create(rootMessageItem.listView.rootPage.bubbleColor) : Color.create(Qt.app.colors.incoming)
+                                        background: (ListItemData.type === "STICKER" && ListItemData.localImagePath && ! ListItemData.hasMention) ? Color.Transparent
+                                                    : ListItemData.isSender ? Color.create(rootMessageItem.listView.rootPage.bubbleColor) : Color.create(Qt.app.colors.incoming)
                                         leftPadding: ui.du(1.5); rightPadding: ui.du(1.5); topPadding: ui.du(1.0); bottomPadding: ui.du(1.0)
                                         layout: StackLayout {
                                         }
@@ -1458,6 +1473,35 @@ Page {
                                             }
                                         }                               
                                         
+                                        // Sticker: drawn without a frame, fetched and decoded by
+                                        // itself (Database::stickerFor), a placeholder until then.
+                                        Container {
+                                            id: stickerCont
+                                            property real side: rootMessageItem.listView.displayWidth * 0.4
+                                            visible: ListItemData.type === "STICKER" && !! ListItemData.mxcUrl
+                                            preferredWidth: side
+                                            preferredHeight: side
+                                            horizontalAlignment: ListItemData.isSender ? HorizontalAlignment.Right : HorizontalAlignment.Left
+                                            layout: DockLayout {
+                                            }
+                                            ImageView {
+                                                visible: !! ListItemData.localImagePath
+                                                imageSource: ListItemData.localImagePath ? ListItemData.localImagePath : ""
+                                                horizontalAlignment: HorizontalAlignment.Fill
+                                                verticalAlignment: VerticalAlignment.Fill
+                                                scalingMethod: ScalingMethod.AspectFit
+                                            }
+                                            ImageView {
+                                                visible: ! ListItemData.localImagePath
+                                                imageSource: "asset:///images/ic_view_image.png"
+                                                preferredWidth: ui.du(8.0)
+                                                preferredHeight: ui.du(8.0)
+                                                filterColor: Color.create(Qt.app.colors.muted)
+                                                horizontalAlignment: HorizontalAlignment.Center
+                                                verticalAlignment: VerticalAlignment.Center
+                                            }
+                                        }
+
                                         Container {
                                             id:audioVideoCont
                                             property string upperType: ListItemData.type ? ListItemData.type.toString().toUpperCase() : ""
