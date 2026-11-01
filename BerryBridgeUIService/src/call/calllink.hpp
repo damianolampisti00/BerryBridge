@@ -16,7 +16,9 @@ struct OpusDecoder;
 
 // The audio plane of a call between this phone and the gateway
 // (WaCalls' bbgateway.go): microphone out, peer audio in, as binary
-// WebSocket frames of [kind, flags, 0, 0, seq u32 LE, ms u32 LE, payload]:
+// WebSocket frames of [kind, flags, pos u16 LE, seq u32 LE, ms u32 LE, payload]
+// (pos: with flag 0x01, the downlink samples played when the block was
+// captured, for the gateway's echo canceller; see pump()):
 // kind 0x01 PCM, or 0x03 one 20 ms Opus packet once the gateway agreed to
 // "audio.codec": "opus" (~24 kbit/s a way instead of 256: over a weak Wi-Fi,
 // shared with a Bluetooth headset, the raw PCM stalled).
