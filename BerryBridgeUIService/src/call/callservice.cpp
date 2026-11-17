@@ -6,12 +6,14 @@
 #include <QDir>
 #include <QFile>
 #include <QMetaType>
+#include <QRegExp>
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QThread>
 #include <QTimer>
 #include <QtNetwork/QLocalServer>
 #include <QtNetwork/QLocalSocket>
+#include <QtNetwork/QTcpSocket>
 
 #include <bb/data/JsonDataAccess>
 #include <bb/platform/Notification>
@@ -24,6 +26,34 @@ Q_DECLARE_METATYPE(AudioRing *)
 using bb::platform::Notification;
 
 namespace {
+// dialhelper (root, next to our EBMService, see WaCalls sipgateway.go): it
+// starts the call in the native call engine, so it rings and talks in the
+// Phone app like the incoming ones. The app may not write the engine's PPS
+// control object itself. Absent or refusing (engine not registered): false,
+// and the call goes the old way, through this app's own audio.
+const quint16 kDialHelperPort = 5071;
+
+bool dialInPhoneApp(const QString &phone, bool video, QString *why)
+{
+    QString digits = phone;
+    digits.remove(QRegExp("[^0-9]"));
+    if (digits.startsWith("00")) digits = digits.mid(2);
+    if (digits.length() < 6 || digits.length() > 15) return false;
+    QTcpSocket s;
+    s.connectToHost(QHostAddress(QHostAddress::LocalHost), kDialHelperPort);
+    if (!s.waitForConnected(300)) return false; // no helper running
+    s.write((video ? "video " : "dial ") + digits.toLatin1() + "\n");
+    s.waitForBytesWritten(300);
+    if (!s.waitForReadyRead(4000)) {
+        *why = "no answer";
+        return false;
+    }
+    const QByteArray r = s.readLine().trimmed();
+    if (r == "ok") return true;
+    *why = QString::fromLatin1(r);
+    return false;
+}
+
 const char *const kStateNames[] = { "idle", "incoming", "outgoing", "active", "ended" };
 
 QByteArray toJson(const QVariantMap &map)
@@ -39,7 +69,7 @@ CallService::CallService(QObject *parent) :
         QObject(parent),
         m_netThread(0), m_link(0),
         m_server(new QLocalServer(this)),
-        m_state(Idle), m_since(0), m_muted(false), m_speaker(false), m_answered(false),
+        m_state(Idle), m_since(0), m_lastVideoStartMs(0), m_muted(false), m_speaker(false), m_answered(false),
         m_upRing(0), m_downRing(0), m_input(0), m_output(0),
         m_ringer(new CallRinger(this)),
         m_ongoing(false),
@@ -121,6 +151,7 @@ void CallService::reloadConfig()
     }
     m_linkState = "connecting";
     m_link = new CallLink(QUrl(url), token.toUtf8(), true, false, 0, 0, m_audioCfg.rate);
+    m_link->setSipRelay(true); // the native call engine's SIP and RTP, see siprelay.hpp
     m_netThread = new QThread(this);
     m_link->moveToThread(m_netThread);
     connect(m_netThread, SIGNAL(started()), m_link, SLOT(start()));
@@ -234,6 +265,17 @@ void CallService::onGatewayText(const QByteArray &utf8)
             postHubNotification("Chiamata WhatsApp persa", m_name.isEmpty() ? m_phone : m_name,
                                 "call-missed-" + m_callId);
         }
+    } else if (type == "notify") {
+        // From the gateway's POST /notify: a script on the server (the Claude
+        // Code hook) reaching the phone over this link, which is open anyway.
+        // The key may only hold [A-Za-z0-9_-]: the lock screen cuts it at ':'.
+        QString key = ev.value("key").toString();
+        key.replace(QRegExp("[^A-Za-z0-9_-]"), "_");
+        Notification *n = new Notification("notify-" + key.left(64), this);
+        n->setTitle(ev.value("title").toString());
+        n->setBody(ev.value("body").toString());
+        n->notify();
+        n->deleteLater();
     } else if (type == "error") {
         qWarning() << "[CALL] gateway error for" << ev.value("for").toString() << ev.value("message").toString();
         if (m_state == Outgoing && ev.value("for").toString() == "call.start") {
@@ -287,6 +329,12 @@ void CallService::handleCommand(const QVariantMap &cmd)
         reloadConfig();
     } else if (c == "start") {
         if (m_state != Idle && m_state != Ended) return;
+        const bool video = cmd.value("video").toBool();
+        const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+        if (video && m_lastVideoStartMs > 0 && nowMs >= m_lastVideoStartMs && (nowMs - m_lastVideoStartMs) < 3000) {
+            qDebug() << "[CALL] ignoring duplicate native video start";
+            return;
+        }
         m_phone = cmd.value("phone").toString().trimmed();
         m_name = cmd.value("name").toString();
         if (m_name.isEmpty()) m_name = nameForPhone(m_phone);
@@ -295,6 +343,17 @@ void CallService::handleCommand(const QVariantMap &cmd)
         m_answered = true;
         m_since = 0;
         m_reason.clear();
+        QString why;
+        if (dialInPhoneApp(m_phone, video, &why)) {
+            if (video) m_lastVideoStartMs = QDateTime::currentMSecsSinceEpoch();
+            qDebug() << (video ? "[CALL] video call placed in the Phone app:" : "[CALL] placed in the Phone app:") << m_phone;
+            return; // the native call screen takes over; this app stays idle
+        }
+        if (video) {
+            setState(Ended, why.isEmpty() ? "Videochiamata nativa non disponibile (dialhelper non raggiungibile)" : why);
+            return; // the app's gateway audio path cannot make a video call
+        }
+        if (!why.isEmpty()) qDebug() << "[CALL] Phone app refused (" << why << "), calling here";
         if (m_linkState != "open") {
             setState(Ended, "Server chiamate non raggiungibile");
             return;

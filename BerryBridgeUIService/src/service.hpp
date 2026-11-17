@@ -73,6 +73,7 @@ private slots:
     void handleInvoke(const bb::system::InvokeRequest &);
     void handleConnectivityChange(bool isOnline);
     void performPeriodicSync();
+    void catchUpAfterPush();
     void startSyncLoop();
     void onSyncResponseReceived();
 
@@ -122,6 +123,12 @@ private:
     bool m_pushHandshakeDone;
     QElapsedTimer m_pushDownSince; // valid while the push link is down
     int m_pushRefused; // handshakes in a row the server answered with an error
+    // Battery: while the push link is up, the catch-up sync rides on its
+    // ping wake-up (every kPingsPerSync pings) instead of a timer of its own.
+    int m_pingsSinceSync;
+    bool m_syncPaused; // PAUSE_SYNC: no sync at all, neither timer nor ping
+    bool pushUp() const;
+    void scheduleSync(); // the next round: on the timer, or on the ping while the push link is up
     class CallService *m_calls; // pinged together with the push link
     bool m_pushResolving; // a FreshResolver lookup is under way
     // Lookup + TCP + TLS + upgrade must be done within this; a lookup that

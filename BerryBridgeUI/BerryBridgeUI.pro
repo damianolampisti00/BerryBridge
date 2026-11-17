@@ -15,6 +15,16 @@ LIBS += -lbbcascadespickers
 QT += gui
 LIBS += -lscreen
 
+# mbedTLS 2.28.9 static TLS 1.2 transport (BB10 device builds only).
+SOURCES += src/net/mbedtlsreply.cpp src/net/mbedtlsnetworkaccessmanager.cpp
+HEADERS += src/net/mbedtlsreply.hpp src/net/mbedtlsnetworkaccessmanager.hpp \
+           src/net/networkmanagerfactory.hpp
+device {
+    DEFINES += BERRYBRIDGE_HAVE_MBEDTLS
+    INCLUDEPATH += $$quote($$_PRO_FILE_PWD_/../third_party/mbedtls/include)
+    LIBS += $$quote($$_PRO_FILE_PWD_/../third_party/mbedtls/lib/armv7/libmbedtls_all.a) -lsocket
+}
+
 # --- Voice messages (src/audio): QNX PCM capture (libasound + audio manager),
 # Ogg/Opus encode/decode (libopus, vendored from BBport, armv7 only), playback
 # through bb::multimedia::MediaPlayer.

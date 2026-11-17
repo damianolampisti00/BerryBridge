@@ -43,6 +43,11 @@ public:
     Q_INVOKABLE void setMute(const QString &chatID, bool value);
     Q_INVOKABLE void markChatAsRead(const QString &accountID, const QString &chatID); // whatsappTab.qml'de bir chat'e giriş için tıklandığında çalışır.
     Q_INVOKABLE void markChatAsUnread(const QString &accountID, const QString &chatID); // whatsappTab.qml'de bir chat'e giriş için tıklandığında çalışır.
+    // The newest page of a chat from Beeper, each time the chat is opened:
+    // messages the push link missed (network drop, service restart) are in
+    // Beeper but not in the cache, and getMessagesForChat only asks Beeper
+    // when the cache has less than a page (2026-11-03, Sofia's chat).
+    Q_INVOKABLE void refreshChatNewest(const QString &chatId);
     Q_INVOKABLE QVariantList getMessagesForChat(const QString &accountID, const QString &chatID, const QString &targetMsgId = "", int limit = 25, int offset = 0);
     Q_INVOKABLE void sendMessage(const QString &accountID, const QString &chatID, const QString &pendingMsgID, const QString &text = "", const QVariantMap &attachment = QVariantMap(), const QString &replyToMessageID = "");
     // voiceDuration > 0: send it as a voice note (attachment type "voice-note") of that many seconds.
@@ -171,6 +176,9 @@ private:
     QString m_cacheRetryCursor;
     int m_cacheRetries;
     QSet<QString> m_msgFetching;
+    QSet<QString> m_newestFetching;          // refreshChatNewest in flight
+    QHash<QString, qint64> m_newestFetchedAt; // ms, to skip a refresh twice in a row
+    void fetchNewestPage(const QString &chatId, const QString &cursor, int page);
     void fetchChatPage(const QString &chatId);
     void upsertChatRow(const QVariantMap &rawChat);
     void touchRefresh();

@@ -9,15 +9,23 @@
 #include <QtEndian>
 
 #include <resolv.h>
+#include <sys/socket.h>
 #include "../freshresolver.hpp"
 
 namespace {
 const char *const kGuid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 // Cloudflare drops idle links after 100 s. The service pings this link
-// together with its push link (keepAliveNow, every 50 s), so the phone wakes
-// once for both; this timer is only the fallback while that one is down.
-const int kKeepAliveMs = 80000;   // ping at least this often...
-const int kSilenceMs = 110000;    // ...and give up after this long without any data
+// together with its push link (keepAliveNow, every 85 s), so the phone wakes
+// once for both; this timer is only the fallback while that one is down, and
+// must stay longer than the push ping or it fires first, a wake-up of its own.
+const int kKeepAliveMs = 95000;   // ping at least this often...
+const int kSilenceMs = 200000;    // ...and give up after this long without any data
+// Kernel send buffer of the link. The default holds many seconds of audio:
+// over a slow network (2026-11-02, a mobile router with 400-650 ms RTT) the
+// SIP relay's RTP queued there unseen and the call lagged 7 s. A small one
+// keeps the backlog in Qt's buffer, where bytesToWrite() sees it and the
+// senders drop instead; 16 KB still carries ~27 KB/s at 600 ms RTT.
+const int kSendBuffer = 16384;
 const int kMaxMessage = 1 << 20;  // a call gateway never sends anything near this
 
 QByteArray randomBytes(int n)
@@ -140,6 +148,9 @@ void WebSocketClient::onSslErrors(const QList<QSslError> &errors)
 void WebSocketClient::onConnected()
 {
     m_state = Handshaking;
+    const int fd = int(m_socket->socketDescriptor());
+    if (fd >= 0 && setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &kSendBuffer, sizeof kSendBuffer) != 0)
+        qWarning() << "[WS] SO_SNDBUF not set";
     m_key = randomBytes(16).toBase64();
     QByteArray path = m_url.encodedPath();
     if (path.isEmpty()) path = "/";
@@ -328,7 +339,7 @@ void WebSocketClient::onKeepAlive()
 {
     if (m_state != Open) return;
     if (m_lastReceived.isValid() && m_lastReceived.elapsed() > kSilenceMs) {
-        finish("no data from the server for 40 s");
+        finish("no data from the server for " + QString::number(kSilenceMs / 1000) + " s");
         return;
     }
     sendFrame(0x9, QByteArray::number(QDateTime::currentMSecsSinceEpoch()));

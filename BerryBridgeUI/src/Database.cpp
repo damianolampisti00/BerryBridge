@@ -2,6 +2,7 @@
 #include "../../BerryBridgeUIService/src/cachepaths.hpp"
 #include <resolv.h>
 #include "Database.hpp"
+#include "net/networkmanagerfactory.hpp"
 #include "sticker/webpimage.hpp"
 #include "sticker/stickeranimator.hpp"
 #include <QDir>
@@ -56,7 +57,7 @@ Database::Database(QObject *parent) : QObject(parent)
 
     m_initRun = m_settings.value("initRun", false).toBool();
     m_cacheRetries = 0;
-    m_netManager = new QNetworkAccessManager(this);
+    m_netManager = new BerryNetworkAccessManager(this);
     connect(m_netManager, SIGNAL(finished(QNetworkReply*)), this, SLOT(onAnyReplyFinished(QNetworkReply*)));
 
     m_avatarActive = 0;
@@ -84,7 +85,6 @@ Database::Database(QObject *parent) : QObject(parent)
     connect(m_netManager, SIGNAL(sslErrors(QNetworkReply*, QList<QSslError>)),
             this, SLOT(onGlobalSslErrors(QNetworkReply*, QList<QSslError>)));
 
-    m_invokeManager = new InvokeManager(this);
     m_chatsReply = 0;
     m_contactsReply = 0;
     chatPercent = 0;
@@ -189,6 +189,28 @@ void Database::fetchChatPage(const QString &chatId)
     m_msgFetching.insert(chatId);
     fetchInitialMessages(chatId, cursor);
     if (m_initialSyncReply) m_initialSyncReply->setProperty("lazy", true);
+}
+
+void Database::refreshChatNewest(const QString &chatId)
+{
+    if (chatId.isEmpty() || m_url.isEmpty() || m_accessToken.isEmpty()) return;
+    if (m_newestFetching.contains(chatId)) return;
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (now - m_newestFetchedAt.value(chatId, 0) < 5000) return; // opened twice in a row
+    m_newestFetchedAt.insert(chatId, now);
+    m_newestFetching.insert(chatId);
+    fetchNewestPage(chatId, "", 1);
+}
+
+// A page that is all new means the gap may go further back: the next older
+// one, up to 5 pages (100 messages), until one already cached is met.
+void Database::fetchNewestPage(const QString &chatId, const QString &cursor, int page)
+{
+    fetchInitialMessages(chatId, cursor);
+    if (m_initialSyncReply) {
+        m_initialSyncReply->setProperty("newest", true);
+        m_initialSyncReply->setProperty("newestPage", page);
+    }
 }
 
 // REST Isteklerinde olusan SSL hatalarini otomatik bastiran slot
@@ -857,8 +879,10 @@ void Database::onInitialMessagesFetched() {
     if (reply == m_initialSyncReply) m_initialSyncReply = 0;
 
     const bool lazy = reply->property("lazy").toBool();
+    const bool newest = reply->property("newest").toBool();
     if (httpStatus != 200) {
         qWarning() << "[DATABASE] Error fetching messages for" << chatId << "HTTP:" << httpStatus;
+        if (newest) { m_newestFetching.remove(chatId); return; }
         if (lazy) { m_msgFetching.remove(chatId); return; }
         processNextChatFromQueue();
         return;
@@ -868,6 +892,7 @@ void Database::onInitialMessagesFetched() {
     QVariantMap root = jda.loadFromBuffer(responseData).toMap();
     QVariantList messages = root["items"].toList();
 
+    int newInPage = 0;
     if (!messages.isEmpty()) {
         // --- MERKEZİ DB BAĞLANTISINI KULLAN ---
         QSqlDatabase db = QSqlDatabase::database("messages_db_conn");
@@ -875,6 +900,12 @@ void Database::onInitialMessagesFetched() {
             db.transaction();
             foreach (const QVariant &v, messages) {
                 QVariantMap msg = v.toMap();
+                if (newest) {
+                    QSqlQuery has(db);
+                    has.prepare("SELECT 1 FROM messages WHERE id = ?");
+                    has.addBindValue(msg["id"].toString());
+                    if (has.exec() && !has.next()) ++newInPage;
+                }
 
                 QSqlQuery ins(db);
                 ins.prepare("INSERT OR REPLACE INTO messages (id, chatID, accountID, senderID, senderName, "
@@ -951,6 +982,20 @@ void Database::onInitialMessagesFetched() {
     bool hasMore = root["hasMore"].toBool();
     QString oldestCursor = root["oldestCursor"].toString();
 
+    if (newest) {
+        const int page = reply->property("newestPage").toInt();
+        if (newInPage > 0) {
+            qDebug() << "[CACHE]" << newInPage << "messages missing from the cache for" << chatId << "- page" << page;
+            touchRefresh();
+        }
+        if (newInPage > 0 && newInPage == messages.size() && hasMore && page < 5
+                && !oldestCursor.isEmpty() && oldestCursor != "null") {
+            fetchNewestPage(chatId, oldestCursor, page + 1);
+        } else {
+            m_newestFetching.remove(chatId);
+        }
+        return;
+    }
     if (lazy) { // one page: the next comes when the chat scrolls there
         m_msgFetching.remove(chatId);
         m_chatCursor.insert(chatId, (hasMore && !oldestCursor.isEmpty() && oldestCursor != "null") ? oldestCursor : QString("END"));

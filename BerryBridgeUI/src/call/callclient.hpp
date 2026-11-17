@@ -41,6 +41,7 @@ public:
     QString link() const { return m_status.value("link", "service not running").toString(); }
 
     Q_INVOKABLE void startCall(const QString &phone, const QString &name);
+    Q_INVOKABLE void startVideoCall(const QString &phone, const QString &name);
     Q_INVOKABLE void accept();
     Q_INVOKABLE void reject();
     Q_INVOKABLE void hangup();
@@ -67,6 +68,7 @@ private slots:
 
 private:
     void send(const QVariantMap &cmd);
+    void startCall(const QString &phone, const QString &name, bool video);
 
     QLocalSocket *m_socket;
     QTimer m_retry;

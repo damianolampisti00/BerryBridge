@@ -3,6 +3,7 @@
 
 #include <QAtomicInt>
 #include <QElapsedTimer>
+#include <QList>
 #include <QMutex>
 #include <QObject>
 #include <QUrl>
@@ -10,15 +11,14 @@
 #include "audioring.hpp"
 
 class QTimer;
+class SipRelay;
 class WebSocketClient;
 struct OpusEncoder;
 struct OpusDecoder;
 
 // The audio plane of a call between this phone and the gateway
 // (WaCalls' bbgateway.go): microphone out, peer audio in, as binary
-// WebSocket frames of [kind, flags, pos u16 LE, seq u32 LE, ms u32 LE, payload]
-// (pos: with flag 0x01, the downlink samples played when the block was
-// captured, for the gateway's echo canceller; see pump()):
+// WebSocket frames of [kind, flags, 0, 0, seq u32 LE, ms u32 LE, payload]:
 // kind 0x01 PCM, or 0x03 one 20 ms Opus packet once the gateway agreed to
 // "audio.codec": "opus" (~24 kbit/s a way instead of 256: over a weak Wi-Fi,
 // shared with a Bluetooth headset, the raw PCM stalled).
@@ -35,6 +35,10 @@ public:
     CallLink(const QUrl &url, const QByteArray &token, bool verifyTls, bool echoTest,
              AudioRing *uplink, AudioRing *downlink, int rate, bool synthetic = false, QObject *parent = 0);
     ~CallLink();
+
+    // Relay the native call engine's SIP and RTP through this link
+    // (SipRelay). Call before start(); only the service's persistent link.
+    void setSipRelay(bool on) { m_sipRelayOn = on; }
 
     // Stats (read from the controller's thread).
     QAtomicInt framesSent, framesReceived, lost, reordered, rttSumMs, rttCount, rttMinMs, rttMaxMs, backlogBytes;
@@ -63,10 +67,18 @@ private slots:
     void pump();
     void reconnect();
     void updatePump();
+    void onSipOut(const QByteArray &bytes);
+    void onRtpOut(quint16 enginePort, const QByteArray &datagram);
+    void onSipControl(const QByteArray &json);
 
 private:
     void setState(const QString &s) { QMutexLocker l(&m_stateMutex); m_state = s; }
     void trackJitter(int samples);
+    QByteArray tunnelFrame(uchar kind, quint16 port, const QByteArray &payload);
+
+    bool m_sipRelayOn;
+    SipRelay *m_sip;
+    quint32 m_tunSeq;
 
     OpusEncoder *m_enc;
     OpusDecoder *m_dec;
@@ -92,6 +104,11 @@ private:
     qint64 m_jAnchorMs, m_jSamples, m_jLastMs;
     double m_jitMs;
     bool m_stopping;
+    QList<QByteArray> m_videoFramePackets;
+    qint64 m_videoFrameBytes;
+    quint32 m_videoFrameTimestamp;
+    bool m_videoFrameActive;
+    bool m_videoFrameDrop;
     QMutex m_stateMutex;
     QString m_state;
 };

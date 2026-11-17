@@ -37,6 +37,12 @@ Page {
     // with an empty input field the send button records instead.
     property bool inputEmpty: true
     property bool voiceActive: voiceRecorder.recording || voiceRecorder.busy
+    // voiceRecorder is shared by every chat page still alive (one per tab can
+    // stay open under another tab), and all of them listen to its signals:
+    // only the page whose token is in Qt.voiceOwner (set when it starts the
+    // recording) sends the result. Without this, a voice note recorded in an
+    // Instagram chat also went to a WhatsApp chat left open in its tab.
+    property string voiceToken: ""
     property variant attachImageSize
     property string attachFileType
     
@@ -380,6 +386,32 @@ Page {
             if (messageModel.size() > 0) loadMessages();
             return;
         }
+
+        // A chat opened before its messages were cached shows what the DB had
+        // (often nothing) while Database::fetchChatPage gets them from Beeper.
+        // The incremental path below only appends messages newer than the last
+        // one shown, so with an empty page it did nothing and the chat stayed
+        // empty until opened again: reload it whole when the DB has more of
+        // the first page than the page shows.
+        if (messageOffset === 0) {
+            var shownCount = 0;
+            var newestShownId = null;
+            var hasPending = false;
+            for (var s = 0; s < messageModel.size(); s++) {
+                var shownItem = messageModel.value(s);
+                if (!shownItem || shownItem.isHeader || !shownItem.id) continue;
+                if (shownItem.id.toString().indexOf("pending_") === 0) { hasPending = true; break; }
+                shownCount++;
+                newestShownId = shownItem.id;
+            }
+            if (!hasPending && shownCount < pageLimit && shownCount < newMessages.length) {
+                console.log("[CHAT-UI] " + (newMessages.length - shownCount) + " more messages cached, reloading the chat.");
+                loadMessages();
+                // a new message while looking at the chat (not the first fill)
+                if (newestShownId !== null && newMessages[0].id !== newestShownId) dat.markChatAsRead(accountID, chatID);
+                return;
+            }
+        }
         
         var hasChanges = false; // Değişim takip bayrağı
         var fetchedMap = {};
@@ -457,6 +489,26 @@ Page {
             }
         }
         
+        // A message older than the newest shown, now in the DB but not in the
+        // list (a gap the push link missed, filled by refreshChatNewest): the
+        // append below only adds newer ones, so reload the chat.
+        var gapFilled = false;
+        if (messageOffset === 0 && lastIndexInDb >= 0) {
+            var shownIds = {};
+            for (var q = 0; q < messageModel.size(); q++) {
+                var qi = messageModel.value(q);
+                if (qi && !qi.isHeader && qi.id) shownIds[qi.id] = true;
+            }
+            for (var g = lastIndexInDb + 1; g < newMessages.length; g++) {
+                if (newMessages[g] && newMessages[g].id && !shownIds[newMessages[g].id]) { gapFilled = true; break; }
+            }
+        }
+        if (gapFilled) {
+            console.log("[CHAT-UI] Older messages filled in. Doing full reload.");
+            loadMessages();
+            return;
+        }
+
         if (hasDeletedMessage || (lastMsgIdInModel !== null && lastIndexInDb === -1)) {
             console.log("[CHAT-UI] Deletion or structural change. Doing full reload.");
             loadMessages();
@@ -532,6 +584,8 @@ Page {
     // A recorded voice message is ready (VoiceRecorder::finished): same optimistic
     // pending bubble + upload path as any other attachment, sent as a voice note.
     function sendVoice(fileUrl, seconds) {
+        if (Qt.voiceOwner !== chatPage.voiceToken) return; // another page's recording
+        Qt.voiceOwner = "";
         var pendingMsgID = "pending_" + new Date().getTime();
         var pendingMsg = {
             "id": pendingMsgID,
@@ -563,6 +617,12 @@ Page {
         chatPage.replyToMessageID = "";
         chatPage.isReplying = false;
         replyAttachVisible = false;
+    }
+
+    function recorderFailed(message) {
+        if (Qt.voiceOwner !== chatPage.voiceToken) return;
+        Qt.voiceOwner = "";
+        showVoiceError(message);
     }
 
     function showVoiceError(message) {
@@ -616,9 +676,12 @@ Page {
         dat.imageDownloaded.disconnect(chatPage.handleImageDownloaded);
         dat.downloadProgress.disconnect(chatPage.handleDownloadProgress);
         voiceRecorder.finished.disconnect(chatPage.sendVoice);
-        voiceRecorder.failed.disconnect(chatPage.showVoiceError);
+        voiceRecorder.failed.disconnect(chatPage.recorderFailed);
         voicePlayer.failed.disconnect(chatPage.showVoiceError);
-        voiceRecorder.cancel();
+        if (Qt.voiceOwner === chatPage.voiceToken) { // leaving the chat mid-recording
+            Qt.voiceOwner = "";
+            voiceRecorder.cancel();
+        }
         voicePlayer.stop();
     }
     
@@ -655,6 +718,19 @@ Page {
             voiceToast.show();
         } else {
             callClient.startCall(phone, chatPage.chatTitle);
+        }
+    }
+
+    function startWhatsAppVideoCall() {
+        var phone = callClient.phoneForChat(chatPage.chatID);
+        if (phone.length == 0) {
+            voiceToast.body = "Numero di telefono non disponibile per questa chat";
+            voiceToast.show();
+        } else if (callClient.link != "open") {
+            voiceToast.body = "Server chiamate non collegato (" + callClient.link + ")";
+            voiceToast.show();
+        } else {
+            callClient.startVideoCall(phone, chatPage.chatTitle);
         }
     }
     
@@ -762,6 +838,16 @@ Page {
                     }
                 }
 
+                Label {
+                    visible: chatPage.canCall && !isSearchMode
+                    text: "\uD83D\uDCF9"
+                    verticalAlignment: VerticalAlignment.Center
+                    textStyle.fontSize: FontSize.XLarge
+                    onTouch: {
+                        if (event.isUp()) chatPage.startWhatsAppVideoCall();
+                    }
+                }
+
             }
         }
         }
@@ -781,7 +867,8 @@ Page {
         app.dbUpdateTriggerChanged.connect(chatPage.handleDbUpdate);
         dat.imageDownloaded.connect(chatPage.handleImageDownloaded);
         voiceRecorder.finished.connect(chatPage.sendVoice);
-        voiceRecorder.failed.connect(chatPage.showVoiceError);
+        voiceToken = new Date().getTime() + "_" + Math.random();
+        voiceRecorder.failed.connect(chatPage.recorderFailed);
         voicePlayer.failed.connect(chatPage.showVoiceError);
         dat.downloadProgress.connect(chatPage.handleDownloadProgress);
         dat.scrollToTargetRequested.connect(chatPage.executeScroll);
@@ -2309,6 +2396,7 @@ Label {
                     onClicked: {
                         var displayMsg = inputField.text.trim();
                         if (!isEditing && !attachSending && displayMsg.length === 0) {
+                            Qt.voiceOwner = chatPage.voiceToken; // see voiceToken
                             voiceRecorder.start(); // nothing typed: record a voice message
                             return;
                         }
@@ -2732,12 +2820,14 @@ Label {
     onAccountIDChanged: {
         if (accountID && chatID) {
             loadMessages();
+            dat.refreshChatNewest(chatID); // what the push link missed (reloads through the refresh file)
         }
     }
     
     onChatIDChanged: {
         if (accountID && chatID) {
             loadMessages();
+            dat.refreshChatNewest(chatID);
         }
     }
     

@@ -1,6 +1,6 @@
-# Builds Berry Bridge (UI app + headless service) and packages ONE .bar,
-# bumping <buildId> in BerryBridgeUI/bar-descriptor.xml first so BB10 accepts
-# it as an in-place update (version must increase).
+# Builds Berry Bridge (UI app + headless service) and packages ONE .bar.
+# The source descriptor is updated only after a successful package, so a failed
+# build does not consume a build id.
 #
 # Usage:  powershell -File package.ps1
 #         powershell -File package.ps1 -Install               (also copies it to
@@ -44,13 +44,14 @@ $env:QNX_TARGET = 'C:\bbndk\ndk\target_10_3_1_995\qnx6'
 $env:JAVA_HOME = $jre
 $env:PATH = "$jre\bin;$h\usr\bin;$env:PATH"
 
-# --- bump build id ---
+# --- prepare next build id in memory; do not touch the source descriptor yet ---
 $descPath = "$ui\bar-descriptor.xml"
 $desc = Get-Content $descPath -Raw
-$build = [int]([regex]::Match($desc, '<buildId>(\d+)</buildId>').Groups[1].Value) + 1
+$buildMatch = [regex]::Match($desc, '<buildId>(\d+)</buildId>')
+if (-not $buildMatch.Success) { throw "Could not find <buildId> in $descPath" }
+$build = [int]$buildMatch.Groups[1].Value + 1
 $desc = $desc -replace '<buildId>\d+</buildId>', "<buildId>$build</buildId>"
 $ver = [regex]::Match($desc, '<versionNumber>([^<]+)</versionNumber>').Groups[1].Value
-Set-Content $descPath $desc -Encoding UTF8 -NoNewline
 $full = "$ver.$build"
 
 # --- build both binaries (out of tree; delete build\<x>\Makefile after a .pro change) ---
@@ -87,13 +88,16 @@ Copy-Item "$root\build\ui\o.le-v7\BerryBridgeUI.so" "$s\arm\o.le-v7\"
 Copy-Item "$root\build\service\BerryBridgeUIService" "$s\arm\o.le-v7\"   # a plain app target: no o.le-v7 subdir
 Copy-Item "$ui\assets" "$s\assets" -Recurse
 Copy-Item "$ui\translations\*.qm" "$s\translations\"
-Copy-Item "$ui\icon.png", $descPath $s
+Copy-Item "$ui\icon.png" $s
+Set-Content (Join-Path $s 'bar-descriptor.xml') $desc -Encoding UTF8 -NoNewline
 Push-Location $s
 $bar = "$root\BerryBridge-$full-armv7.bar"
 blackberry-nativepackager -package $bar bar-descriptor.xml -configuration Device-Release -devMode
 $packOk = ($LASTEXITCODE -eq 0)
 Pop-Location
 if (-not $packOk) { throw 'packaging failed' }
+# Commit the build id only after a complete, successful BAR package exists.
+Set-Content $descPath $desc -Encoding UTF8 -NoNewline
 Write-Host "Created $bar (version $full)"
 
 if (-not $Install) { exit 0 }

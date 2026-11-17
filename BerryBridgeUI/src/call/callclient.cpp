@@ -110,10 +110,21 @@ QString CallClient::elapsed() const
 
 void CallClient::startCall(const QString &phone, const QString &name)
 {
+    startCall(phone, name, false);
+}
+
+void CallClient::startVideoCall(const QString &phone, const QString &name)
+{
+    startCall(phone, name, true);
+}
+
+void CallClient::startCall(const QString &phone, const QString &name, bool video)
+{
     QVariantMap c;
     c["cmd"] = "start";
     c["phone"] = phone;
     c["name"] = name;
+    c["video"] = video;
     send(c);
 }
 

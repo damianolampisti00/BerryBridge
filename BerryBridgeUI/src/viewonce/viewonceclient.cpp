@@ -1,5 +1,6 @@
 #include "../../../BerryBridgeUIService/src/cachepaths.hpp"
 #include "viewonceclient.hpp"
+#include "../net/networkmanagerfactory.hpp"
 
 #include <QDateTime>
 #include <QDir>
@@ -25,7 +26,7 @@ const int kVideoLifetimeMs = 60 * 1000;
 }
 
 ViewOnceClient::ViewOnceClient(QObject *parent) :
-        QObject(parent), m_nam(new QNetworkAccessManager(this)), m_reply(0), m_sendReply(0), m_busy(false)
+        QObject(parent), m_nam(new BerryNetworkAccessManager(this)), m_reply(0), m_sendReply(0), m_busy(false)
 {
     // A video left behind by a crash or a kill: never keep one.
     QDir tmp(QDir::tempPath());

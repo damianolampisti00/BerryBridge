@@ -17,6 +17,7 @@
 #include "../../BerryBridgeUIService/src/cachepaths.hpp"
 #include "../../BerryBridgeUIService/src/notificationkey.hpp"
 #include "applicationui.hpp"
+#include "net/networkmanagerfactory.hpp"
 #include "Database.hpp"
 #include "ScreenManager.hpp"
 #include "audio/voicerecorder.hpp"
@@ -121,7 +122,7 @@ ApplicationUI::ApplicationUI() :
 
     m_disableTrackpadFocus = m_settings.value("settings/disableTrackpadFocus", true).toBool();
 
-    m_networkManager = new QNetworkAccessManager(this);
+    m_networkManager = new BerryNetworkAccessManager(this);
 
     // Slot imzasına (QNetworkReply*) eklendi
     connect(m_networkManager, SIGNAL(finished(QNetworkReply*)),

@@ -43,6 +43,7 @@ static QString stateSettingsPath()
 #include <time.h>
 #include <resolv.h>
 #include "freshresolver.hpp"
+#include "../../BerryBridgeUI/src/net/networkmanagerfactory.hpp"
 #include "tlspolicy.hpp"
 #include "cachepaths.hpp"
 #include "notificationkey.hpp"
@@ -56,18 +57,28 @@ using namespace bb::platform;
 using namespace bb::system;
 using namespace bb::data;
 
+namespace {
+// Under Cloudflare's 100 s idle limit, with room for a late timer.
+const int kPushPingMs = 85000;
+const int kPushWatchdogMs = 200000; // two pings unanswered
+const int kSyncMs = 300000;         // catch-up sync while the push link is down
+const int kPingsPerSync = 18;       // ~25 min while it is up
+}
+
 Service::Service() :
         QObject(),
         m_netConfManager(0),
         m_syncTimer(0),
         m_notify(new Notification(this)),
         m_invokeManager(new InvokeManager(this)),
-        m_networkManager(new QNetworkAccessManager(this)),
+        m_networkManager(new BerryNetworkAccessManager(this)),
         m_lastSyncTimestamp("1970-01-01T00:00:00Z"),
         m_pushSocket(new QSslSocket(this)),
         m_pushPingTimer(new QTimer(this)),
         m_pushWatchdogTimer(new QTimer(this)),
         m_pushRefused(0),
+        m_pingsSinceSync(0),
+        m_syncPaused(false),
         m_calls(0),
         m_cacheActive(false),
         m_pushResolving(false),
@@ -76,6 +87,16 @@ Service::Service() :
         m_pushEncrypted(true),
         m_pushPort(443)
 {
+    // Were left uninitialised (2026-11-03).
+    m_pushSkipCount = 0;
+    m_initialSyncComplete = true;
+    m_syncReply = 0;
+    // QElapsedTimer has no default constructor in Qt 4.8: its storage must be
+    // invalidated before startPushConnection() checks isValid()/elapsed().
+    m_pushDownSince.invalidate();
+    m_pushHandshakeDone = false;
+    m_fragmentedOpcode = 0;
+
     // --- GLOBAL SSL/TLS KONFİGÜRASYONU ---
     // (QNetworkAccessManager üzerinden yapılacak REST API istekleri için varsayılan ayar)
     QSslConfiguration sslConfig = QSslConfiguration::defaultConfiguration();
@@ -230,6 +251,7 @@ void Service::handleInvoke(const bb::system::InvokeRequest & request)
 void Service::pauseSyncing()
 {
     qDebug() << "[SERVICE] Pausing sync loop - initial database download in progress";
+    m_syncPaused = true;
     if (m_syncTimer) {
         m_syncTimer->stop();
     }
@@ -241,6 +263,7 @@ void Service::resumeSyncing()
 
     // Load user preferences when resuming
     loadUserPreferences();
+    m_syncPaused = false;
 
     if (m_syncTimer) {
         m_syncTimer->start();
@@ -295,7 +318,25 @@ void Service::startSyncLoop()
     connect(m_syncTimer, SIGNAL(timeout()), this, SLOT(performPeriodicSync()));
 
     performPeriodicSync();
-    m_syncTimer->start(300000); // the push link brings messages at once; this only catches up
+    m_syncTimer->setInterval(kSyncMs); // the push link brings messages at once; this only catches up
+    scheduleSync();
+}
+
+bool Service::pushUp() const
+{
+    return m_pushSocket && m_pushSocket->state() == QAbstractSocket::ConnectedState && m_pushHandshakeDone;
+}
+
+// Battery (2026-11-06): on mobile data every wake-up that touches the network
+// costs a radio connection plus ~10 s of tail. While the push link is up its
+// ping wakes the phone anyway, so the catch-up sync goes out in that same
+// wake-up, every kPingsPerSync pings (~25 min, like the old 1-in-5 skip of the
+// 5-min timer); the timer runs only while the push link is down.
+void Service::scheduleSync()
+{
+    if (!m_syncTimer || m_syncPaused) return;
+    if (pushUp()) m_syncTimer->stop();
+    else m_syncTimer->start(kSyncMs);
 }
 
 void Service::performPeriodicSync()
@@ -343,6 +384,17 @@ void Service::performPeriodicSync()
     }
 }
 
+// Right after the push link comes back: what arrived while it was down is
+// not pushed again, and the periodic sync skips 4 rounds in 5 while the link
+// is up (2026-11-03: 7 messages lost to a Wi-Fi change, 13:42-13:44).
+void Service::catchUpAfterPush()
+{
+    qDebug() << "[SYNC] push link back: catching up since" << m_lastSyncTimestamp;
+    m_pushSkipCount = 4; // the next round runs
+    m_pingsSinceSync = 0;
+    performPeriodicSync();
+}
+
 void Service::onSyncResponseReceived()
 {
     // Sinyali gönderen reply nesnesini sender() ile alıyoruz
@@ -364,7 +416,7 @@ void Service::onSyncResponseReceived()
         reply->readAll();
         if (m_syncReply == reply) m_syncReply = 0;
         reply->deleteLater();
-        if (m_syncTimer) m_syncTimer->start(300000);
+        scheduleSync();
         return;
     }
 
@@ -373,7 +425,7 @@ void Service::onSyncResponseReceived()
     if (reply->error() != QNetworkReply::NoError || httpStatus >= 400) {
         qWarning() << "[DATABASE] Sync Failed! HTTP:" << httpStatus;
         m_nextCursor = "";
-        if (m_syncTimer) m_syncTimer->start(300000);
+        scheduleSync();
         if (m_syncReply == reply) m_syncReply = 0;
         reply->deleteLater();
         return;
@@ -417,7 +469,7 @@ void Service::onSyncResponseReceived()
 
         if (!msgDb.isOpen() || !chatDb.isOpen()) {
             qCritical() << "[DATABASE] Kritik Hata: Veritabanları açılamadı!";
-            if (m_syncTimer) m_syncTimer->start(300000);
+            scheduleSync();
             if (m_syncReply == reply) m_syncReply = 0;
             reply->deleteLater();
             return;
@@ -725,7 +777,8 @@ void Service::onSyncResponseReceived()
     }
 
     if (m_syncTimer) {
-        m_syncTimer->start(!m_nextCursor.isEmpty() ? 1000 : 60000);
+        if (!m_nextCursor.isEmpty()) m_syncTimer->start(1000); // the next page
+        else scheduleSync();
     }
 
     if (m_syncReply == reply) m_syncReply = 0;
@@ -1080,6 +1133,8 @@ void Service::startPushConnection()
 
     m_pushHandshakeDone = false;
     m_wsBuffer.clear();
+    m_fragmentedPayload.clear();
+    m_fragmentedOpcode = 0;
 
     // Ortak sinyaller
     connect(m_pushSocket, SIGNAL(disconnected()), this, SLOT(onPushDisconnected()), Qt::UniqueConnection);
@@ -1155,10 +1210,12 @@ void Service::onPushConnected()
     m_pushSocket->write(request.toUtf8());
     m_pushSocket->flush();
 
-    // Battery: every wake-up keeps the radio on for seconds. Cloudflare drops
-    // idle WebSockets after 100 s, so a ping every 50 s is enough.
-    m_pushPingTimer->start(50000);
-    m_pushWatchdogTimer->start(130000);
+    // Battery: every wake-up keeps the radio on for seconds (on LTE a radio
+    // connection plus ~10 s of tail). Cloudflare drops idle WebSockets after
+    // 100 s, so the ping goes out just inside that: 42 wake-ups an hour
+    // instead of 72 at 50 s (2026-11-06).
+    m_pushPingTimer->start(kPushPingMs);
+    m_pushWatchdogTimer->start(kPushWatchdogMs);
 }
 
 void Service::onPushConnectDeadline()
@@ -1199,6 +1256,8 @@ void Service::onPushDisconnected()
     //sendStatusNotification("Push Connection", "Disconnected from Server. Reconnecting...");
     m_pushPingTimer->stop();
     m_pushWatchdogTimer->stop();
+    // No ping to carry the catch-up sync: back to its own timer.
+    if (m_syncTimer && !m_syncPaused && !m_syncTimer->isActive()) m_syncTimer->start(kSyncMs);
     // While the server keeps refusing (Beeper Desktop down: the tunnel answers
     // 502 for hours), back off up to 2 minutes instead of a TLS handshake
     // every 5 s. A network change still reconnects at once.
@@ -1211,17 +1270,35 @@ void Service::onPushDisconnected()
 void Service::onPushReadyRead()
 {
     try {
-        // Reset watchdog on any data receive
-        m_pushWatchdogTimer->start(130000);
+        const int maxReceiveBuffer = 2 * 1024 * 1024;
+        const int maxHandshakeHeader = 16 * 1024;
+        const int maxFramePayload = 1024 * 1024;
 
+        // Reset watchdog on any data receive
+        m_pushWatchdogTimer->start(kPushWatchdogMs);
+
+        if (m_pushSocket->bytesAvailable() > maxReceiveBuffer - m_wsBuffer.size()) {
+            qWarning() << "[service.cpp] [PUSH] receive buffer limit exceeded";
+            m_wsBuffer.clear();
+            m_fragmentedPayload.clear();
+            m_fragmentedOpcode = 0;
+            m_pushSocket->abort();
+            return;
+        }
         m_wsBuffer.append(m_pushSocket->readAll());
 
         // DEBUG: İşlem öncesi buffer boyutu
         // qDebug() << "[service.cpp] [PUSH] İşlem öncesi buffer boyutu:" << m_wsBuffer.size();
 
+        bool malformed = false;
         if (!m_pushHandshakeDone) {
             int idx = m_wsBuffer.indexOf("\r\n\r\n");
-            if (idx != -1) {
+            if (idx == -1) {
+                if (m_wsBuffer.size() > maxHandshakeHeader) malformed = true;
+                else return;
+            } else if (idx + 4 > maxHandshakeHeader) {
+                malformed = true;
+            } else {
                 // Only "101 Switching Protocols" opens the WebSocket; anything
                 // else (502 from the tunnel, 401 for a bad token) comes with
                 // an HTML/text body that is not made of frames.
@@ -1231,6 +1308,8 @@ void Service::onPushReadyRead()
                     qWarning() << "[service.cpp] [PUSH] server refused the WebSocket:" << status
                                << "- attempt" << m_pushRefused;
                     m_wsBuffer.clear();
+                    m_fragmentedPayload.clear();
+                    m_fragmentedOpcode = 0;
                     m_pushSocket->abort(); // -> onPushDisconnected(), which backs off
                     return;
                 }
@@ -1240,6 +1319,7 @@ void Service::onPushReadyRead()
                 m_pushConnectTimer->stop();
                 m_wsBuffer.remove(0, idx + 4);
                 qDebug() << "[service.cpp] [PUSH] WebSocket Handshake complete!";
+                QTimer::singleShot(3000, this, SLOT(catchUpAfterPush()));
 
                 // Send subscription payload
                 QString sub = "{\"type\":\"subscriptions.set\",\"requestID\":\"bb10-init\",\"chatIDs\":[\"*\"]}";
@@ -1250,13 +1330,11 @@ void Service::onPushReadyRead()
                 frame.append(sub.toUtf8());
                 m_pushSocket->write(frame);
                 m_pushSocket->flush();
-            } else {
-                return;
             }
         }
 
         // Parse WS frames
-        while(m_wsBuffer.size() >= 2) {
+        while(!malformed && m_wsBuffer.size() >= 2) {
             unsigned char byte1 = m_wsBuffer[0];
             unsigned char byte2 = m_wsBuffer[1];
 
@@ -1274,10 +1352,39 @@ void Service::onPushReadyRead()
                 headerLen += 2;
             } else if (payloadLen == 127) {
                 if (m_wsBuffer.size() < 10) return;
+                if ((static_cast<unsigned char>(m_wsBuffer[2]) & 0x80) != 0) {
+                    malformed = true;
+                    break;
+                }
                 quint64 len;
                 memcpy(&len, m_wsBuffer.constData() + 2, 8);
                 payloadLen = qFromBigEndian(len);
                 headerLen += 8;
+            }
+
+            if (payloadLen > quint64(maxFramePayload)) {
+                malformed = true;
+                break;
+            }
+
+            if (opcode >= 0x08 && (!fin || payloadLen > 125)) {
+                malformed = true;
+                break;
+            }
+            if (opcode != 0x00 && opcode != 0x01 && opcode != 0x02
+                    && opcode != 0x08 && opcode != 0x09 && opcode != 0x0A) {
+                malformed = true;
+                break;
+            }
+            if (opcode == 0x00) {
+                if (m_fragmentedOpcode == 0 || m_fragmentedPayload.size() > maxFramePayload
+                        || payloadLen > quint64(maxFramePayload - m_fragmentedPayload.size())) {
+                    malformed = true;
+                    break;
+                }
+            } else if ((opcode == 0x01 || opcode == 0x02) && m_fragmentedOpcode != 0) {
+                malformed = true;
+                break;
             }
 
             QByteArray maskingKey;
@@ -1287,20 +1394,20 @@ void Service::onPushReadyRead()
                  headerLen += 4;
             }
 
-            if ((quint64)m_wsBuffer.size() < (quint64)headerLen + payloadLen) {
+            if (qint64(m_wsBuffer.size()) < qint64(headerLen) + qint64(payloadLen)) {
                 // Need more data, bekliyoruz
                 return;
             }
 
-            QByteArray payload = m_wsBuffer.mid(headerLen, payloadLen);
+            QByteArray payload = m_wsBuffer.mid(headerLen, int(payloadLen));
             if (masked) {
-                 for(quint64 i = 0; i < payloadLen; ++i) {
-                     payload[(int)i] = payload[(int)i] ^ maskingKey[(int)(i % 4)];
+                 for(int i = 0; i < int(payloadLen); ++i) {
+                     payload[i] = payload[i] ^ maskingKey[i % 4];
                  }
             }
 
             // İşlenen frame'i ana buffer'dan sil
-            m_wsBuffer.remove(0, headerLen + payloadLen);
+            m_wsBuffer.remove(0, headerLen + int(payloadLen));
 
             // 1. Text (0x01) veya Binary (0x02) Frame
             if (opcode == 0x01 || opcode == 0x02) {
@@ -1347,6 +1454,15 @@ void Service::onPushReadyRead()
             else {
                 qWarning() << "[service.cpp] [PUSH-DEBUG] ISLENMEYEN FRAME! Opcode:" << opcode << "Uzunluk:" << payloadLen;
             }
+        }
+
+        if (malformed) {
+            qWarning() << "[service.cpp] [PUSH] malformed or oversized WebSocket input";
+            m_wsBuffer.clear();
+            m_fragmentedPayload.clear();
+            m_fragmentedOpcode = 0;
+            m_pushSocket->abort();
+            return;
         }
 
         // DEBUG: Döngüden sonra kalan buffer boyutu (Eğer sürekli artıyorsa kısır döngü veya yanlış boyut var demektir)
@@ -1749,12 +1865,19 @@ void Service::onPushPingTimeout()
         pingFrame.append(char(0)); pingFrame.append(char(0)); pingFrame.append(char(0)); pingFrame.append(char(0));
         m_pushSocket->write(pingFrame);
         m_pushSocket->flush();
+        // The catch-up sync, in this same wake-up (see scheduleSync).
+        if (m_syncTimer && !m_syncPaused && m_cacheActive && !m_syncReply && m_nextCursor.isEmpty()
+                && ++m_pingsSinceSync >= kPingsPerSync) {
+            m_pingsSinceSync = 0;
+            m_pushSkipCount = 4; // the round runs (the push-up skip counts to 5)
+            performPeriodicSync();
+        }
     }
 }
 
 void Service::onPushWatchdogTimeout()
 {
-    qDebug() << "[service.cpp] [PUSH] Watchdog timeout after 130s of silence! Connection silently died. Reconnecting...";
+    qDebug() << "[service.cpp] [PUSH] Watchdog timeout after" << kPushWatchdogMs / 1000 << "s of silence! Connection silently died. Reconnecting...";
     m_pushSocket->abort();  // abort() avoids TIME_WAIT overhead and cleans socket state instantly, triggering disconnected()
 }
 
@@ -2099,11 +2222,21 @@ void Service::onUiClients(int count)
     if (active) {
         qDebug() << "[CACHE] the app is open: cache on";
         QDir().mkpath(bbCacheDir());
-        // The app fills the cache from Beeper itself; the catch-up sync
-        // only has to look from now on.
-        const QString now = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
-        QSettings(stateSettingsPath(), QSettings::IniFormat).setValue("lastSyncTimestamp", now);
-        m_lastSyncTimestamp = now;
+        // A new cache: the app fills it from Beeper itself, so the catch-up
+        // sync only has to look from now on. A cache still there (the app
+        // reopened within 10 s, a restart of this service) keeps its time:
+        // resetting it lost what came while the push link was down
+        // (2026-11-03 13:57-14:01).
+        const bool freshCache = !QFile::exists(bbCachePath("messages.db"));
+        const QString saved = QSettings(stateSettingsPath(), QSettings::IniFormat).value("lastSyncTimestamp", "").toString();
+        if (freshCache || saved.isEmpty()) {
+            const QString now = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
+            QSettings(stateSettingsPath(), QSettings::IniFormat).setValue("lastSyncTimestamp", now);
+            m_lastSyncTimestamp = now;
+        } else {
+            m_lastSyncTimestamp = saved;
+            qDebug() << "[CACHE] cache kept: catching up since" << saved;
+        }
         initDatabases();
         startSyncLoop();
     } else {

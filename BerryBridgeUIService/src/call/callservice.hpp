@@ -104,6 +104,7 @@ private:
     QString m_name;
     QString m_reason;
     qint64 m_since;
+    qint64 m_lastVideoStartMs;
     bool m_muted;
     bool m_speaker;
     bool m_answered;

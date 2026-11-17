@@ -1,4 +1,5 @@
 #include "calllink.hpp"
+#include "siprelay.hpp"
 #include "websocketclient.hpp"
 
 #include <QDebug>
@@ -14,9 +15,18 @@ namespace {
 const int kHeader = 12;
 const uchar kKindPcm = 0x01;
 const uchar kKindOpus = 0x03;
+const uchar kKindSip = 0x10; // SipRelay: the native engine's SIP stream
+const uchar kKindRtp = 0x11; // SipRelay: one RTP datagram, [2:4] = the engine's UDP port
 const int kOpusBitrate = 24000;
 const int kFrameMs = 20;          // uplink block: 20 ms (the server re-blocks to MLow's 60 ms)
 const qint64 kMaxBacklog = 32000; // ~1 s of audio waiting in the socket: drop instead of queueing more
+// RTP also carries H.264 keyframes in short bursts. Buffer each video access
+// unit before sending it so a congested link drops a whole frame, not the tail
+// of an IDR. Keep both one frame and the socket backlog bounded.
+const qint64 kMaxAudioRtpBacklog = 4096;
+const qint64 kMaxVideoRtpBacklog = 128 * 1024;
+const qint64 kMaxVideoFrameBytes = 128 * 1024;
+const uchar kSipVideoPayloadType = 109;
 
 // Downlink jitter buffer, adaptive (2026-10-26: on a hotel-grade Wi-Fi the
 // peer's audio came in bursts, the fixed 80 ms buffer overflowed and playback
@@ -38,7 +48,9 @@ CallLink::CallLink(const QUrl &url, const QByteArray &token, bool verifyTls, boo
         m_url(url), m_token(token), m_verify(verifyTls), m_echo(echoTest), m_synthetic(synthetic),
         m_uplink(uplink), m_downlink(downlink), m_rate(rate),
         m_ws(0), m_pumpTimer(0), m_seq(0), m_lastRxSeq(0), m_syntheticSent(0),
-        m_jStarted(false), m_jAnchorMs(0), m_jSamples(0), m_jLastMs(0), m_jitMs(0), m_stopping(false)
+        m_jStarted(false), m_jAnchorMs(0), m_jSamples(0), m_jLastMs(0), m_jitMs(0), m_stopping(false),
+        m_sipRelayOn(false), m_sip(0), m_tunSeq(0),
+        m_videoFrameBytes(0), m_videoFrameTimestamp(0), m_videoFrameActive(false), m_videoFrameDrop(false)
 {
 }
 
@@ -93,7 +105,78 @@ void CallLink::start()
     m_pumpTimer->setInterval(10);
     connect(m_pumpTimer, SIGNAL(timeout()), this, SLOT(pump()));
     m_clock.start();
+    if (m_sipRelayOn) {
+        m_sip = new SipRelay(this);
+        connect(m_sip, SIGNAL(sipOut(QByteArray)), this, SLOT(onSipOut(QByteArray)));
+        connect(m_sip, SIGNAL(rtpOut(quint16,QByteArray)), this, SLOT(onRtpOut(quint16,QByteArray)));
+        connect(m_sip, SIGNAL(controlOut(QByteArray)), this, SLOT(onSipControl(QByteArray)));
+    }
     reconnect();
+}
+
+QByteArray CallLink::tunnelFrame(uchar kind, quint16 port, const QByteArray &payload)
+{
+    QByteArray f(kHeader, 0);
+    uchar *h = reinterpret_cast<uchar *>(f.data());
+    h[0] = kind;
+    qToLittleEndian<quint16>(port, h + 2);
+    qToLittleEndian<quint32>(++m_tunSeq, h + 4);
+    qToLittleEndian<quint32>(quint32(m_clock.elapsed()), h + 8);
+    return f + payload;
+}
+
+void CallLink::onSipOut(const QByteArray &bytes)
+{
+    if (m_ws && m_ws->isOpen()) m_ws->sendBinary(tunnelFrame(kKindSip, 0, bytes));
+}
+
+void CallLink::onRtpOut(quint16 enginePort, const QByteArray &datagram)
+{
+    if (!m_ws || !m_ws->isOpen()) return;
+    const bool video = datagram.size() >= 12 &&
+            (uchar(datagram.at(0)) >> 6) == 2 &&
+            (uchar(datagram.at(1)) & 0x7f) == kSipVideoPayloadType;
+    if (!video) {
+        if (m_ws->bytesToWrite() > kMaxAudioRtpBacklog) return; // stalled: lose audio, don't queue delay
+        m_ws->sendBinary(tunnelFrame(kKindRtp, enginePort, datagram));
+        return;
+    }
+
+    const quint32 timestamp = qFromBigEndian<quint32>(reinterpret_cast<const uchar *>(datagram.constData()) + 4);
+    const bool marker = (uchar(datagram.at(1)) & 0x80) != 0;
+    if (!m_videoFrameActive || timestamp != m_videoFrameTimestamp) {
+        m_videoFramePackets.clear(); // a missing marker: discard the partial frame
+        m_videoFrameBytes = 0;
+        m_videoFrameTimestamp = timestamp;
+        m_videoFrameActive = true;
+        m_videoFrameDrop = false;
+    }
+    if (!m_videoFrameDrop) {
+        m_videoFrameBytes += kHeader + datagram.size();
+        if (m_videoFrameBytes > kMaxVideoFrameBytes) {
+            m_videoFramePackets.clear();
+            m_videoFrameBytes = 0;
+            m_videoFrameDrop = true;
+        } else {
+            m_videoFramePackets.append(datagram);
+        }
+    }
+    if (!marker) return;
+
+    if (!m_videoFrameDrop && !m_videoFramePackets.isEmpty() &&
+            m_ws->bytesToWrite() + m_videoFrameBytes <= kMaxVideoRtpBacklog) {
+        for (int i = 0; i < m_videoFramePackets.size(); ++i) {
+            if (!m_ws->sendBinary(tunnelFrame(kKindRtp, enginePort, m_videoFramePackets.at(i)))) break;
+        }
+    }
+    m_videoFramePackets.clear();
+    m_videoFrameBytes = 0;
+    m_videoFrameActive = m_videoFrameDrop = false;
+}
+
+void CallLink::onSipControl(const QByteArray &json)
+{
+    if (m_ws && m_ws->isOpen()) m_ws->sendText(json);
 }
 
 void CallLink::reconnect()
@@ -128,6 +211,7 @@ void CallLink::onOpened()
     m_syntheticSent = m_clock.elapsed() * m_rate / 1000; // tone starts now, no catch-up burst
     if (m_uplink) m_uplink->clear();                       // nor stale mic audio
     updatePump();
+    if (m_sip) m_sip->linkUp();
     emit linkOpened();
 }
 
@@ -169,6 +253,10 @@ void CallLink::onClosed(const QString &reason)
     setState("closed: " + reason);
     if (m_pumpTimer) m_pumpTimer->stop();
     qWarning() << "[CALLLINK] closed:" << reason;
+    if (m_sip) m_sip->linkDown();
+    m_videoFramePackets.clear();
+    m_videoFrameBytes = 0;
+    m_videoFrameActive = m_videoFrameDrop = false;
     emit linkClosed(reason);
     if (!m_stopping) QTimer::singleShot(m_echo ? 2000 : 5000, this, SLOT(reconnect()));
 }
@@ -179,12 +267,19 @@ void CallLink::onText(const QByteArray &utf8)
         m_opus = m_enc && m_dec && utf8.contains("\"opus\"");
         qDebug() << "[CALLLINK] audio codec:" << (m_opus ? "opus" : "pcm");
     }
+    if (m_sip && utf8.contains("\"sip.close\"")) m_sip->gatewayClosedSip();
     emit textReceived(utf8);
 }
 
 void CallLink::onBinary(const QByteArray &data)
 {
     const uchar kind = data.size() >= kHeader ? uchar(data.at(0)) : 0;
+    if (m_sip && (kind == kKindSip || kind == kKindRtp)) {
+        if (kind == kKindSip) m_sip->fromGatewaySip(data.mid(kHeader));
+        else m_sip->fromGatewayRtp(qFromLittleEndian<quint16>(reinterpret_cast<const uchar *>(data.constData()) + 2),
+                                   data.mid(kHeader));
+        return;
+    }
     if (kind != kKindPcm && kind != kKindOpus) return;
     const uchar *h = reinterpret_cast<const uchar *>(data.constData());
     const quint32 seq = qFromLittleEndian<quint32>(h + 4);

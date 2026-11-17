@@ -27,28 +27,28 @@ What it adds:
 
 ## 📞 WhatsApp calls (experimental)
 
-Berry Bridge can make and receive **WhatsApp voice calls** on the BlackBerry. Beeper doesn't carry calls, so they go through [WaCalls](https://github.com/JotaDev66/WaCalls), a server that implements WhatsApp's VoIP stack (signaling, MLow codec, SRTP relays) on top of whatsmeow, plus a small **Berry Bridge gateway** added to it in [damianolampisti00/WaCalls](https://github.com/damianolampisti00/WaCalls#berry-bridge-gateway-blackberry-10) (`cmd/server/bbgateway.go`). The phone stays a plain audio terminal: it only moves 16 kHz audio (Opus, about 24 kbit/s each way, or raw PCM with an older gateway) and simple JSON commands over one TLS WebSocket.
+Berry Bridge can make and receive **WhatsApp calls** on the BlackBerry. Beeper doesn't carry calls, so they go through [WaCalls](https://github.com/JotaDev66/WaCalls), a server that implements WhatsApp's VoIP stack (signaling, MLow codec, SRTP relays) on top of whatsmeow, plus a small **Berry Bridge gateway** added to it in [damianolampisti00/WaCalls](https://github.com/damianolampisti00/WaCalls#berry-bridge-gateway-blackberry-10) (`cmd/server/bbgateway.go`). The in-app call screen carries 16 kHz audio (Opus, about 24 kbit/s each way, or raw PCM with an older gateway) and simple JSON over one TLS WebSocket. Calls handled by the native Phone app use the SIP/RTP relay, which can carry H.264 video when WaCalls is started with `-wa-video`.
 
 ```
 WhatsApp <-> WaCalls (linked device of your account) <-> gateway (wss, token) <-> Berry Bridge service <-> mic / earpiece / speaker
 ```
 
 - **Incoming calls**: like a phone call, the screen turns on and a system dialog with *Rispondi* / *Rifiuta* shows up, also on the lock screen (the password prompt appears with it if the phone is locked with one). Sound and vibration follow the active profile and Berry Bridge's notification settings (Settings > Notifications). The call screen comes to the front, plus a Hub notification (and a missed-call one if you don't answer). The call also rings on your main phone, as on any linked device.
-- **Outgoing calls**: the ☎ button in the title bar of WhatsApp one-to-one chats (the number comes from Beeper's participant list).
+- **Outgoing calls**: the ☎ button starts a voice call; the camera button starts a video call in the native Phone app. Both use the number from Beeper's participant list. Video requires WaCalls `-wa-video` and the updated root dialhelper.
 - **In a call**: timer, mute, speaker/earpiece, hang up. The call lives in the headless service, so hiding the screen or closing the app doesn't end it. A quiet "Chiamata WhatsApp in corso" notification in the Hub brings the call screen back.
 - **Audio**: 16 kHz mono, 20 ms blocks, the system's voice audio path. Playback goes through a jitter buffer that sizes itself to how late packets arrive (80-480 ms) and refills after every pause (no packets come while the peer is silent), so network jitter doesn't chop the speech; the gateway buffers the phone's audio the same way. Each mic block carries the speaker position it was recorded against (counted, not timed), so the gateway can cancel the phone's own earpiece/speaker echo; it also cancels the user's voice coming back from a hands-free peer, and levels both voices. About 10% CPU on a Q10. The certificate of the gateway is verified.
 
 Setup:
 
-1. Run [the WaCalls fork](https://github.com/damianolampisti00/WaCalls) with the gateway on its own listener and a random token (16+ characters) in a file, e.g. `wacalls -addr 127.0.0.1:8097 -bb-addr 127.0.0.1:8098 -bb-token-file bb_token`, and pair it with your WhatsApp (QR, *Linked devices*). Keep the WaCalls API itself on localhost: it has no authentication.
+1. Run [the WaCalls fork](https://github.com/damianolampisti00/WaCalls) with the gateway on its own listener and a random token (16+ characters) in a file, e.g. `wacalls -addr 127.0.0.1:8097 -bb-addr 127.0.0.1:8098 -bb-token-file bb_token -sip-addr 127.0.0.1:5070 -wa-video`, and pair it with your WhatsApp (QR, *Linked devices*). Keep the WaCalls API itself on localhost: it has no authentication. `-sip-addr` enables the SIP gateway the native Phone app uses (without it calls there are refused); `-wa-video` enables WhatsApp's 1:1 H.264 video signaling.
 2. Expose only the gateway, over HTTPS (for example a Cloudflare tunnel to `localhost:8098`; HTTP/2 transport is the safer choice for a long-lived audio stream).
 3. In Berry Bridge **Settings** (menu > Settings): *Calls server* `wss://your-host/ws` and *Calls token*. The status line below them shows the link state.
 
-Not done yet: video calls, group calls.
+Not done yet: group calls. The Berry Bridge in-app call screen is audio-only; 1:1 video uses the native Phone app and the SIP/RTP path.
 
 For development, `package.ps1 -DevTools` adds a call-audio test harness (driven by a file in the shared folder) and debug logs in the app's data folder. Never use it for builds you give to others: the shared folder is reachable by other apps.
 
-Credits: Berry Bridge by Adem Zengin (MIT, see `LICENSE`); the Ogg/Opus encoder and decoder come from BBport; libopus is BSD-licensed (`third_party/opus/COPYING`); calls rely on WaCalls by JotaDev66 (MIT) and whatsmeow.
+Credits: Berry Bridge by Adem Zengin (MIT, see `LICENSE`); the Ogg/Opus encoder and decoder and the mbedTLS network backend are adapted from BBport (GPL-3.0-only, see `BerryBridgeUI/src/net/COPYING.GPL-3.0`); mbed TLS 2.28.9 is Apache-2.0 (`third_party/mbedtls/LICENSE`); libopus is BSD-licensed (`third_party/opus/COPYING`); calls rely on WaCalls by JotaDev66 (MIT) and whatsmeow.
 
 ## 📱 Screenshots
 
@@ -117,6 +117,7 @@ Follow these steps or watch the setup guide on YouTube to connect your BlackBerr
    ```text
    http://YOUR_LOCAL_IPV4:23373
    ```
+   **Security:** Beeper's local API uses plain HTTP here. The access token and message traffic are not encrypted on the LAN. Use this only on a trusted, private network; do not forward port `23373` to the internet. For remote access, use the HTTPS cloud setup below.
 
 ### 3. Configure Windows Firewall
 1. Open the Windows Start menu, search for **Windows Security**, and launch it.
@@ -152,7 +153,7 @@ To access your messages outside your local network without keeping a home PC con
 3. Select **Subnets** > Click on your subnet.
 4. Click on the **Default Security List**.
 5. Under **Ingress Rules**, click **Add Ingress Rules**.
-6. Add rules allowing incoming TCP traffic on ports **`80`**, **`443`**, and **`3389`**.
+6. Add ingress rules for TCP ports **`80`** and **`443`** (HTTP is used for Let's Encrypt certificate issuance/renewal and redirects to HTTPS). Do not expose RDP (`3389`) or Beeper's API port (`23373`) publicly. Restrict SSH (`22`) to your current public IP address where the cloud firewall supports it.
 
 ### 3. Server Configuration over SSH
 Connect to your server via SSH (e.g., using Terminal or PuTTY):
@@ -161,22 +162,16 @@ Connect to your server via SSH (e.g., using Terminal or PuTTY):
 ssh -i /path/to/your_private_key.key ubuntu@YOUR_PUBLIC_IP
 ```
 
-Set a password for the `ubuntu` user:
-```bash
-sudo passwd ubuntu
-```
-
-Install the XFCE desktop environment, XRDP (Remote Desktop), and Firefox:
+Install XFCE and Firefox for the remote desktop session:
 ```bash
 sudo apt update
-sudo apt install xfce4 xfce4-goodies xrdp firefox -y
+sudo apt install xfce4 xfce4-goodies firefox -y
 echo "xfce4-session" > ~/.xsession
-sudo systemctl restart xrdp
 ```
 
-Open system firewall ports:
+Keep administrative access on SSH. If a graphical session is needed, use an SSH tunnel to a separately configured, localhost-bound RDP service; do not add a public `3389` firewall rule. Open HTTP/HTTPS for the site (and SSH from trusted addresses):
 ```bash
-sudo iptables -I INPUT -p tcp -m multiport --dports 80,443,3389 -j ACCEPT
+sudo iptables -I INPUT -p tcp -m multiport --dports 80,443 -j ACCEPT
 sudo netfilter-persistent save
 ```
 
@@ -199,7 +194,15 @@ sudo nano /etc/nginx/sites-available/beeper
 
 Paste the following configuration (replace `YOUR_DOMAIN.duckdns.org` with your actual domain):
 
+**BB10 compatibility:** BerryBridge's HTTPS API on the Q10 uses vendored mbedTLS 2.28.9; a standalone probe verified a TLS 1.2 connection. Qt's `QSslSocket` push connection succeeds with the current host, but that host also accepts TLS 1.0, so this does not establish which protocol was negotiated. A `QSslSocket` probe constrained to the host-supported `ECDHE-ECDSA-AES128-GCM-SHA256` TLS 1.2 cipher failed, while direct OpenSSL TLS 1.2 succeeded. Therefore, do not claim push or call compatibility with a TLS-1.2-only endpoint until those paths are migrated or verified. Keep the public endpoint on TLS 1.2; do not weaken its TLS settings.
+
 ```nginx
+server {
+    listen 80;
+    server_name YOUR_DOMAIN.duckdns.org;
+    return 301 https://$host$request_uri;
+}
+
 server {
     listen 443 ssl;
     server_name YOUR_DOMAIN.duckdns.org;
@@ -209,9 +212,11 @@ server {
     ssl_certificate /etc/letsencrypt/live/YOUR_DOMAIN.duckdns.org/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/YOUR_DOMAIN.duckdns.org/privkey.pem;
 
-    ssl_protocols TLSv1 TLSv1.1 TLSv1.2 TLSv1.3;
+    # Keep the public endpoint on TLS 1.2. BerryBridge's HTTP API transport
+    # uses mbed TLS; push and call WebSockets remain unverified (see above).
+    ssl_protocols TLSv1.2;
     ssl_prefer_server_ciphers on;
-    ssl_ciphers 'ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-SHA:@SECLEVEL=0';
+    ssl_ciphers 'ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384';
     access_log /var/log/nginx/beeper_access.log ssl_verbose;
     error_log /var/log/nginx/beeper_error.log info;
 
@@ -240,20 +245,19 @@ sudo rm -f /etc/nginx/sites-enabled/default
 sudo systemctl restart nginx
 ```
 
-### 6. Connect via RDP & Install Beeper Desktop
-1. Launch **Remote Desktop Connection** on your PC.
-2. Connect to your server's **Public IP Address**.
-3. Log in with Username: `ubuntu` and the password set earlier.
-4. Open **Firefox** inside the remote desktop session.
-5. Download Beeper Desktop:
+### 6. Connect to the desktop privately & Install Beeper Desktop
+1. Keep RDP bound to `127.0.0.1` on the server and allow it only through an SSH tunnel. Do not expose port `3389` on the public IP. For example, from a trusted computer run `ssh -i /path/to/key -L 13389:127.0.0.1:3389 ubuntu@YOUR_PUBLIC_IP`, then connect Remote Desktop to `localhost:13389`.
+2. Log in using the server account.
+3. Open **Firefox** inside the remote desktop session.
+4. Download Beeper Desktop:
    [https://api.beeper.com/desktop/download/linux/arm64/stable/com.automattic.beeper.desktop](https://api.beeper.com/desktop/download/linux/arm64/stable/com.automattic.beeper.desktop)
-6. Open the **Downloads** folder, right-click the `.AppImage` file > **Properties** > **Permissions** > Check **Allow this file to run as a program**.
-7. Double-click the file to launch **Beeper Desktop**.
-8. Sign in, link your messaging accounts.
-9. Generate your **Access Token** under **Settings > Integrations > Approved Connections** (Set *Expires In* to **NEVER** and *Allow sensitive actions* to **YES**). Save this token securely.
+5. Open the **Downloads** folder, right-click the `.AppImage` file > **Properties** > **Permissions** > Check **Allow this file to run as a program**.
+6. Double-click the file to launch **Beeper Desktop**.
+7. Sign in, link your messaging accounts.
+8. Generate your **Access Token** under **Settings > Integrations > Approved Connections** (Set *Expires In* to **NEVER** and *Allow sensitive actions* to **YES**). Save this token securely.
 
 ### 7. Connect Berry Bridge on BlackBerry 10
-1. Open **Berry Bridge** on your BB10 device and go to **Settings**.
+1. Open **Berry Bridge** on your BB10 device and go to **Settings**. The HTTP API path uses mbed TLS 2.28.9 and TLS 1.2. Push notifications and WhatsApp call signaling still use Qt TLS and are not expected to work against this TLS 1.2-only endpoint.
 2. Enter your domain name as the **Server URL** (e.g., `https://YOUR_DOMAIN.duckdns.org`).
 3. Paste your generated **Access Token**.
 4. Tap **List Accounts** and enjoy global access!
