@@ -46,6 +46,7 @@ Setup:
 1. Run [the WaCalls fork](https://github.com/damianolampisti00/WaCalls) with the gateway on its own listener and a random token (16+ characters) in a file, e.g. `wacalls -addr 127.0.0.1:8097 -bb-addr 127.0.0.1:8098 -bb-token-file bb_token -sip-addr 127.0.0.1:5070 -wa-video`, and pair it with your WhatsApp (QR, *Linked devices*). Keep the WaCalls API itself on localhost: it has no authentication. `-sip-addr` enables the SIP gateway the native Phone app uses (without it calls there are refused); Opus is offered by default (`-sip-opus` with `-sip-delayed-offer`, PCMU as fallback); `-wa-video` enables H.264 video both ways.
 2. Expose only the gateway, over HTTPS (for example a Cloudflare tunnel to `localhost:8098`; HTTP/2 transport is the safer choice for a long-lived audio stream).
 3. In Berry Bridge **Settings** (menu > Settings): *Calls server* `wss://your-host/ws` and *Calls token*. The status line below them shows the link state.
+4. *(Optional, for native Phone app voice & H.264 video calls)* Install the root phone helpers and `EBMService` patch on the BB10 device via [`tools/native-phone/`](tools/native-phone/README.md). Without it, voice calls still work in Berry Bridge's in-app call screen.
 
 Not done yet: group calls. The Berry Bridge in-app call screen is audio-only; 1:1 video uses the native Phone app and the SIP/RTP path, H.264 both ways.
 
