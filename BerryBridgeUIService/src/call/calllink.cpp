@@ -1,8 +1,10 @@
 #include "calllink.hpp"
 #include "siprelay.hpp"
 #include "websocketclient.hpp"
+#include "../netroute.hpp"
 
 #include <QDebug>
+#include <QHostAddress>
 #include <QTimer>
 #include <QtEndian>
 
@@ -50,7 +52,8 @@ CallLink::CallLink(const QUrl &url, const QByteArray &token, bool verifyTls, boo
         m_ws(0), m_pumpTimer(0), m_seq(0), m_lastRxSeq(0), m_syntheticSent(0),
         m_jStarted(false), m_jAnchorMs(0), m_jSamples(0), m_jLastMs(0), m_jitMs(0), m_stopping(false),
         m_sipRelayOn(false), m_sip(0), m_tunSeq(0),
-        m_videoFrameBytes(0), m_videoFrameTimestamp(0), m_videoFrameActive(false), m_videoFrameDrop(false)
+        m_videoFrameBytes(0), m_videoFrameTimestamp(0), m_videoFrameActive(false), m_videoFrameDrop(false),
+        m_deferredMigrate(false)
 {
 }
 
@@ -223,6 +226,37 @@ void CallLink::sendText(const QByteArray &utf8)
 void CallLink::keepAlive()
 {
     if (m_ws) m_ws->keepAliveNow();
+}
+
+void CallLink::checkNetworkRoute(bool uiCallActive)
+{
+    if (m_stopping || !m_ws || !m_ws->isOpen()) return;
+    const QHostAddress local = m_ws->localAddress();
+    const QHostAddress peer = m_ws->peerAddress();
+    const QHostAddress pref = preferredLocalAddress(peer);
+    if (local.isNull() || pref.isNull() || local == pref) {
+        m_deferredMigrate = false;
+        return;
+    }
+    const bool sipRtpActive = m_sip && m_sip->rtpActiveRecently(5000);
+    const bool callBusy = uiCallActive || sipRtpActive;
+    if (callBusy && isLocalAddressAssigned(local)) {
+        if (!m_deferredMigrate) {
+            qDebug() << "[CALLLINK] route prefers" << pref.toString() << "over" << local.toString()
+                     << "- deferring until call ends";
+        }
+        m_deferredMigrate = true;
+        return;
+    }
+    m_deferredMigrate = false;
+    qDebug() << "[CALLLINK] migrating from" << local.toString() << "to" << pref.toString()
+             << (callBusy ? "(old interface gone mid-call)" : "");
+    if (m_pumpTimer) m_pumpTimer->stop();
+    if (m_sip) m_sip->linkDown();
+    m_videoFramePackets.clear();
+    m_videoFrameBytes = 0;
+    m_videoFrameActive = m_videoFrameDrop = false;
+    reconnect();
 }
 
 void CallLink::setAudio(AudioRing *uplink, AudioRing *downlink)

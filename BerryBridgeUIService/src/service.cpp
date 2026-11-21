@@ -41,8 +41,12 @@ static QString stateSettingsPath()
 #include <QSqlRecord>
 #include <sys/time.h>
 #include <time.h>
+#include <fcntl.h>
 #include <resolv.h>
+#include <string.h>
+#include <unistd.h>
 #include "freshresolver.hpp"
+#include "netroute.hpp"
 #include "../../BerryBridgeUI/src/net/networkmanagerfactory.hpp"
 #include "tlspolicy.hpp"
 #include "cachepaths.hpp"
@@ -51,6 +55,7 @@ static QString stateSettingsPath()
 
 #include "memoryguard.hpp"
 
+#include <QSocketNotifier>
 #include <QTimer>
 
 using namespace bb::platform;
@@ -85,7 +90,10 @@ Service::Service() :
         m_pushConnectTimer(new QTimer(this)),
         m_pushAttempt(0),
         m_pushEncrypted(true),
-        m_pushPort(443)
+        m_pushPort(443),
+        m_netPpsFd(-1),
+        m_netPpsNotifier(0),
+        m_routeCheckTimer(0)
 {
     // Were left uninitialised (2026-11-03).
     m_pushSkipCount = 0;
@@ -136,6 +144,25 @@ Service::Service() :
 
     m_netConfManager = new QNetworkConfigurationManager(this);
     connect(m_netConfManager, SIGNAL(onlineStateChanged(bool)), this, SLOT(handleConnectivityChange(bool)));
+    m_routeCheckTimer = new QTimer(this);
+    m_routeCheckTimer->setSingleShot(true);
+    connect(m_routeCheckTimer, SIGNAL(timeout()), this, SLOT(checkNetworkRoute()));
+    connect(m_netConfManager, SIGNAL(configurationChanged(QNetworkConfiguration)), this, SLOT(onNetConfigChanged()));
+    m_netPpsFd = ::open("/pps/services/networking/status_public?wait,delta", O_RDONLY);
+    if (m_netPpsFd >= 0) {
+        ::fcntl(m_netPpsFd, F_SETFD, FD_CLOEXEC);
+        char initBuf[2048];
+        if (::read(m_netPpsFd, initBuf, sizeof(initBuf)) > 0) {
+            m_netPpsNotifier = new QSocketNotifier(m_netPpsFd, QSocketNotifier::Read, this);
+            connect(m_netPpsNotifier, SIGNAL(activated(int)), this, SLOT(onNetPpsReady()));
+            qDebug() << "[service.cpp] [NETWORK] watching /pps/services/networking/status_public";
+        } else {
+            ::close(m_netPpsFd);
+            m_netPpsFd = -1;
+        }
+    } else {
+        qWarning() << "[service.cpp] [NETWORK] failed to watch /pps/services/networking/status_public";
+    }
 
     QTimer::singleShot(2000, this, SLOT(startSyncLoop()));
     connect(m_networkManager, SIGNAL(finished(QNetworkReply*)), this, SLOT(onAnyReplyFinished(QNetworkReply*)));
@@ -176,6 +203,14 @@ Service::Service() :
         startPushConnection();
     } else {
         qDebug() << "[service.cpp] [NETWORK] Device is OFFLINE at startup. Waiting for connection...";
+    }
+}
+
+Service::~Service()
+{
+    if (m_netPpsFd >= 0) {
+        ::close(m_netPpsFd);
+        m_netPpsFd = -1;
     }
 }
 
@@ -225,7 +260,7 @@ void Service::handleInvoke(const bb::system::InvokeRequest & request)
     }
     else if (request.action().compare("it.berrybridge.service.INIT_UPDATE") == 0) {
         qDebug() << "[service.cpp]    → Handling INIT_UPDATE action";
-        //initDatabases();
+        initDatabases();
         m_settings.sync();
         m_initRun=m_settings.value("initRun").toBool();
         qDebug() << "[service.cpp] m_initRun: "<<m_initRun;
@@ -804,6 +839,63 @@ void Service::handleConnectivityChange(bool isOnline)
          m_pushWatchdogTimer->stop();
          m_pushConnectTimer->stop();
     }
+}
+
+void Service::scheduleRouteCheck()
+{
+    if (m_routeCheckTimer) m_routeCheckTimer->start(2000);
+}
+
+void Service::onNetConfigChanged()
+{
+    scheduleRouteCheck();
+}
+
+void Service::onNetPpsReady()
+{
+    char buf[2048];
+    const ssize_t n = ::read(m_netPpsFd, buf, sizeof(buf) - 1);
+    if (n <= 0) {
+        if (m_netPpsNotifier) {
+            m_netPpsNotifier->setEnabled(false);
+            m_netPpsNotifier->deleteLater();
+            m_netPpsNotifier = 0;
+        }
+        if (m_netPpsFd >= 0) {
+            ::close(m_netPpsFd);
+            m_netPpsFd = -1;
+        }
+        qWarning() << "[service.cpp] [NETWORK] PPS watcher stopped";
+        return;
+    }
+    buf[n] = '\0';
+    if (strstr(buf, "default_interface") || strstr(buf, "default_gateway") ||
+        strstr(buf, "ip4_ok") || strstr(buf, "ip_ok") || strstr(buf, "nameservers")) {
+        scheduleRouteCheck();
+    }
+}
+
+void Service::checkNetworkRoute()
+{
+    if (m_pushSocket && m_pushSocket->state() == QAbstractSocket::ConnectedState) {
+        const QHostAddress local = m_pushSocket->localAddress();
+        const QHostAddress peer = m_pushSocket->peerAddress();
+        const QHostAddress pref = preferredLocalAddress(peer);
+        if (!local.isNull() && !pref.isNull() && local != pref) {
+            qDebug() << "[service.cpp] [NETWORK] push socket on" << local.toString()
+                     << "but route prefers" << pref.toString() << "- reconnecting";
+            res_init();
+            disconnect(m_pushSocket, SIGNAL(disconnected()), this, SLOT(onPushDisconnected()));
+            m_pushPingTimer->stop();
+            m_pushWatchdogTimer->stop();
+            m_pushConnectTimer->stop();
+            m_pushHandshakeDone = false;
+            m_pushRefused = 0;
+            m_pushSocket->abort();
+            startPushConnection();
+        }
+    }
+    if (m_calls) m_calls->checkNetworkRoute();
 }
 
 void Service::loadUserPreferences()
@@ -1857,6 +1949,7 @@ void Service::handlePushEvent(const QByteArray &payload)
 void Service::onPushPingTimeout()
 {
     if (g_memoryGuard) g_memoryGuard->check(); // awake anyway: see memoryguard.hpp
+    checkNetworkRoute();
     if (m_calls) m_calls->keepAlive(); // the call link's ping, in the same wake-up
     if (m_pushSocket->state() == QAbstractSocket::ConnectedState && m_pushHandshakeDone) {
         QByteArray pingFrame;

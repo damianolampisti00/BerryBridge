@@ -49,6 +49,7 @@ public slots:
     // Ping the gateway link now: the service does it with its push ping, one
     // wake-up for both.
     void keepAlive();
+    void checkNetworkRoute();
     // Re-read callServerUrl/callToken and (re)connect.
     void reloadConfig();
 
@@ -73,6 +74,7 @@ private slots:
 private:
     enum State { Idle, Incoming, Outgoing, Active, Ended };
     void handleCommand(const QVariantMap &cmd);
+    void placeCall(const QString &phone, const QString &name, bool video);
     void sendGateway(const QVariantMap &msg);
     void setState(State s, const QString &reason = QString());
     void broadcast();

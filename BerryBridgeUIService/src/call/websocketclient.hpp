@@ -38,6 +38,8 @@ public:
     void open(const QUrl &url, const Headers &headers = Headers(), bool verifyPeer = true);
     void close(quint16 code = 1000, const QByteArray &reason = QByteArray());
     bool isOpen() const { return m_state == Open; }
+    QHostAddress localAddress() const;
+    QHostAddress peerAddress() const;
 
     bool sendText(const QByteArray &utf8);
     bool sendBinary(const QByteArray &data);

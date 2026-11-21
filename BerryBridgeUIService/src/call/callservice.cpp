@@ -276,9 +276,15 @@ void CallService::onGatewayText(const QByteArray &utf8)
         n->setBody(ev.value("body").toString());
         n->notify();
         n->deleteLater();
+    } else if (type == "lid.resolved") {
+        const QString phone = ev.value("phone").toString().trimmed();
+        if (!phone.isEmpty() && (m_state == Idle || m_state == Ended)) {
+            placeCall(phone, ev.value("name").toString(), ev.value("video").toBool());
+        }
     } else if (type == "error") {
-        qWarning() << "[CALL] gateway error for" << ev.value("for").toString() << ev.value("message").toString();
-        if (m_state == Outgoing && ev.value("for").toString() == "call.start") {
+        const QString forType = ev.value("for").toString();
+        qWarning() << "[CALL] gateway error for" << forType << ev.value("message").toString();
+        if ((m_state == Outgoing && forType == "call.start") || forType == "lid.resolve") {
             stopAudio();
             setState(Ended, ev.value("message").toString());
         }
@@ -322,6 +328,38 @@ void CallService::onClientData()
     }
 }
 
+void CallService::placeCall(const QString &phone, const QString &name, bool video)
+{
+    m_phone = phone.trimmed();
+    m_name = name;
+    if (m_name.isEmpty()) m_name = nameForPhone(m_phone);
+    m_callId.clear();
+    m_muted = m_speaker = false;
+    m_answered = true;
+    m_since = 0;
+    m_reason.clear();
+    QString why;
+    if (dialInPhoneApp(m_phone, video, &why)) {
+        if (video) m_lastVideoStartMs = QDateTime::currentMSecsSinceEpoch();
+        qDebug() << (video ? "[CALL] video call placed in the Phone app:" : "[CALL] placed in the Phone app:") << m_phone;
+        return; // the native call screen takes over; this app stays idle
+    }
+    if (video) {
+        setState(Ended, why.isEmpty() ? "Videochiamata nativa non disponibile (dialhelper non raggiungibile)" : why);
+        return; // the app's gateway audio path cannot make a video call
+    }
+    if (!why.isEmpty()) qDebug() << "[CALL] Phone app refused (" << why << "), calling here";
+    if (m_linkState != "open") {
+        setState(Ended, "Server chiamate non raggiungibile");
+        return;
+    }
+    QVariantMap msg;
+    msg["type"] = "call.start";
+    msg["phone"] = m_phone;
+    sendGateway(msg);
+    setState(Outgoing);
+}
+
 void CallService::handleCommand(const QVariantMap &cmd)
 {
     const QString c = cmd.value("cmd").toString();
@@ -335,34 +373,22 @@ void CallService::handleCommand(const QVariantMap &cmd)
             qDebug() << "[CALL] ignoring duplicate native video start";
             return;
         }
-        m_phone = cmd.value("phone").toString().trimmed();
-        m_name = cmd.value("name").toString();
-        if (m_name.isEmpty()) m_name = nameForPhone(m_phone);
-        m_callId.clear();
-        m_muted = m_speaker = false;
-        m_answered = true;
-        m_since = 0;
-        m_reason.clear();
-        QString why;
-        if (dialInPhoneApp(m_phone, video, &why)) {
-            if (video) m_lastVideoStartMs = QDateTime::currentMSecsSinceEpoch();
-            qDebug() << (video ? "[CALL] video call placed in the Phone app:" : "[CALL] placed in the Phone app:") << m_phone;
-            return; // the native call screen takes over; this app stays idle
-        }
-        if (video) {
-            setState(Ended, why.isEmpty() ? "Videochiamata nativa non disponibile (dialhelper non raggiungibile)" : why);
-            return; // the app's gateway audio path cannot make a video call
-        }
-        if (!why.isEmpty()) qDebug() << "[CALL] Phone app refused (" << why << "), calling here";
-        if (m_linkState != "open") {
-            setState(Ended, "Server chiamate non raggiungibile");
+        const QString phone = cmd.value("phone").toString().trimmed();
+        const QString name = cmd.value("name").toString();
+        if (phone.startsWith("lid:")) {
+            if (m_linkState != "open") {
+                setState(Ended, "Server chiamate non raggiungibile");
+                return;
+            }
+            QVariantMap msg;
+            msg["type"] = "lid.resolve";
+            msg["lid"] = phone.mid(4);
+            msg["name"] = name;
+            msg["video"] = video;
+            sendGateway(msg);
             return;
         }
-        QVariantMap msg;
-        msg["type"] = "call.start";
-        msg["phone"] = m_phone;
-        sendGateway(msg);
-        setState(Outgoing);
+        placeCall(phone, name, video);
     } else if (c == "accept") {
         if (m_state != Incoming) return;
         ring(false);
@@ -428,6 +454,7 @@ void CallService::broadcast()
 
 void CallService::setState(State s, const QString &reason)
 {
+    const bool wasBusy = (m_state == Incoming || m_state == Outgoing || m_state == Active);
     m_state = s;
     if (!reason.isEmpty() || s != Ended) m_reason = reason;
     qDebug() << "[CALL] state" << kStateNames[s] << reason;
@@ -460,11 +487,19 @@ void CallService::setState(State s, const QString &reason)
     }
     broadcast();
     if (s == Ended) QTimer::singleShot(4000, this, SLOT(finishEnded()));
+    if (wasBusy && (s == Idle || s == Ended)) checkNetworkRoute();
 }
 
 void CallService::keepAlive()
 {
     if (m_link) QMetaObject::invokeMethod(m_link, "keepAlive", Qt::QueuedConnection);
+}
+
+void CallService::checkNetworkRoute()
+{
+    if (!m_link) return;
+    const bool inCall = (m_state == Incoming || m_state == Outgoing || m_state == Active);
+    QMetaObject::invokeMethod(m_link, "checkNetworkRoute", Qt::QueuedConnection, Q_ARG(bool, inCall));
 }
 
 void CallService::finishEnded()

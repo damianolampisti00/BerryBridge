@@ -2,6 +2,7 @@
 #define SIPRELAY_HPP_
 
 #include <QByteArray>
+#include <QElapsedTimer>
 #include <QObject>
 
 class QTcpServer;
@@ -27,6 +28,7 @@ public:
     explicit SipRelay(QObject *parent = 0);
 
     bool engineConnected() const;
+    bool rtpActiveRecently(qint64 windowMs = 5000) const;
     // From the gateway.
     void fromGatewaySip(const QByteArray &bytes);
     void fromGatewayRtp(quint16 enginePort, const QByteArray &datagram);
@@ -53,6 +55,7 @@ private:
     QUdpSocket *m_udp;
     bool m_linkUp;
     bool m_announced; // sip.open sent on this link connection
+    QElapsedTimer m_lastRtp;
 };
 
 #endif /* SIPRELAY_HPP_ */

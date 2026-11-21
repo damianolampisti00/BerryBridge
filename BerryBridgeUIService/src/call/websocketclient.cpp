@@ -81,6 +81,7 @@ bool WebSocketClient::isSecure(const QUrl &url)
 
 void WebSocketClient::open(const QUrl &url, const Headers &headers, bool verifyPeer)
 {
+    m_keepAlive.stop();
     if (m_socket) {
         m_socket->disconnect(this);
         m_socket->abort();
@@ -310,6 +311,16 @@ bool WebSocketClient::sendBinary(const QByteArray &data) { return sendFrame(0x2,
 qint64 WebSocketClient::bytesToWrite() const
 {
     return m_socket ? m_socket->bytesToWrite() + m_socket->encryptedBytesToWrite() : 0;
+}
+
+QHostAddress WebSocketClient::localAddress() const
+{
+    return m_socket ? m_socket->localAddress() : QHostAddress();
+}
+
+QHostAddress WebSocketClient::peerAddress() const
+{
+    return m_socket ? m_socket->peerAddress() : QHostAddress();
 }
 
 void WebSocketClient::close(quint16 code, const QByteArray &reason)

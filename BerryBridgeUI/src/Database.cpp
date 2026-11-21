@@ -807,6 +807,13 @@ void Database::initializeDatabaseSync() {
         return;
     }
 
+    // Tell the headless service to reopen the newly created SQLite files
+    // instead of keeping file descriptors open on the unlinked ones.
+    bb::system::InvokeRequest request;
+    request.setTarget("it.berrybridge.service");
+    request.setAction("it.berrybridge.service.INIT_UPDATE");
+    m_invokeManager->invoke(request);
+
     qDebug() << "[DATABASE] Tablolar sıfırlandı ve yeniden oluşturuldu.";
 
     emit syncProgress("Fetching all chats from Beeper...", chatPercent);

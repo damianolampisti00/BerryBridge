@@ -34,6 +34,8 @@
 #include <QElapsedTimer>
 #include <QQueue>
 
+class QSocketNotifier;
+
 namespace bb {
     class Application;
     namespace platform {
@@ -50,7 +52,7 @@ class Service: public QObject
     Q_OBJECT
 public:
     Service();
-    virtual ~Service() {}
+    virtual ~Service();
     // Pause/resume syncing for initial database download
     Q_INVOKABLE void pauseSyncing();
     Q_INVOKABLE void resumeSyncing();
@@ -72,6 +74,9 @@ private slots:
     void onAnyReplyFinished(QNetworkReply *reply);
     void handleInvoke(const bb::system::InvokeRequest &);
     void handleConnectivityChange(bool isOnline);
+    void onNetPpsReady();
+    void onNetConfigChanged();
+    void checkNetworkRoute();
     void performPeriodicSync();
     void catchUpAfterPush();
     void startSyncLoop();
@@ -159,6 +164,10 @@ private:
     QByteArray m_fragmentedPayload;
     int m_fragmentedOpcode;
     QString getTimestamp();
+    void scheduleRouteCheck();
+    int m_netPpsFd;
+    QSocketNotifier *m_netPpsNotifier;
+    QTimer *m_routeCheckTimer;
 };
 
 #endif /* SERVICE_H_ */

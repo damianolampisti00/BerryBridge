@@ -164,11 +164,26 @@ QString CallClient::phoneForChat(const QString &chatID) const
     const QVariant parsed = parseJson(rows.first().toMap().value("participants_json").toString());
     QVariantList items = parsed.toList();
     if (items.isEmpty()) items = parsed.toMap().value("items").toList();
+    QString lidFallback;
     for (int i = 0; i < items.size(); ++i) {
         const QVariantMap p = items.at(i).toMap();
         if (p.value("isSelf").toBool()) continue;
         const QString phone = p.value("phoneNumber").toString();
         if (!phone.isEmpty()) return phone;
+        if (lidFallback.isEmpty()) {
+            const QString id = p.value("id").toString();
+            const int colon = id.indexOf(':');
+            const QString local = colon > 0 ? id.left(colon) : id;
+            if (local.startsWith("@whatsapp_lid-")) {
+                const QString lid = local.mid(14);
+                if (!lid.isEmpty()) lidFallback = "lid:" + lid;
+            } else if (local.startsWith("@whatsapp_")) {
+                const QString tail = local.mid(10);
+                bool ok = !tail.isEmpty();
+                for (int k = 0; k < tail.size() && ok; ++k) ok = tail.at(k).isDigit();
+                if (ok) lidFallback = "+" + tail;
+            }
+        }
     }
-    return QString();
+    return lidFallback;
 }

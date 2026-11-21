@@ -10,6 +10,7 @@ SipRelay::SipRelay(QObject *parent) :
         QObject(parent), m_server(new QTcpServer(this)), m_engine(0), m_udp(new QUdpSocket(this)),
         m_linkUp(false), m_announced(false)
 {
+    m_lastRtp.invalidate();
     connect(m_server, SIGNAL(newConnection()), this, SLOT(onNewConnection()));
     if (!m_server->listen(QHostAddress::LocalHost, kSipPort))
         qWarning() << "[SIPRELAY] cannot listen on SIP port:" << m_server->errorString();
@@ -72,8 +73,16 @@ void SipRelay::onRtp()
         QHostAddress from;
         quint16 port = 0;
         if (m_udp->readDatagram(d.data(), d.size(), &from, &port) < 0) continue;
-        if (m_linkUp && m_announced && from == QHostAddress::LocalHost) emit rtpOut(port, d);
+        if (m_linkUp && m_announced && from == QHostAddress::LocalHost) {
+            m_lastRtp.start();
+            emit rtpOut(port, d);
+        }
     }
+}
+
+bool SipRelay::rtpActiveRecently(qint64 windowMs) const
+{
+    return m_lastRtp.isValid() && m_lastRtp.elapsed() < windowMs;
 }
 
 void SipRelay::fromGatewaySip(const QByteArray &bytes)
@@ -83,7 +92,10 @@ void SipRelay::fromGatewaySip(const QByteArray &bytes)
 
 void SipRelay::fromGatewayRtp(quint16 enginePort, const QByteArray &datagram)
 {
-    if (enginePort) m_udp->writeDatagram(datagram, QHostAddress::LocalHost, enginePort);
+    if (enginePort) {
+        m_lastRtp.start();
+        m_udp->writeDatagram(datagram, QHostAddress::LocalHost, enginePort);
+    }
 }
 
 void SipRelay::gatewayClosedSip()

@@ -53,6 +53,7 @@ public slots:
     void setAudio(AudioRing *uplink, AudioRing *downlink);
     // The gateway link's keepalive, timed by the service (see websocketclient.cpp).
     void keepAlive();
+    void checkNetworkRoute(bool uiCallActive);
 
 signals:
     void linkOpened();
@@ -109,6 +110,7 @@ private:
     quint32 m_videoFrameTimestamp;
     bool m_videoFrameActive;
     bool m_videoFrameDrop;
+    bool m_deferredMigrate;
     QMutex m_stateMutex;
     QString m_state;
 };
